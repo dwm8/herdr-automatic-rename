@@ -41,6 +41,7 @@
 #                                 automatic-rename.sh precmd [<shell-name>]
 #   * the "reset" action:         automatic-rename.sh reset      (re-adopt active tab)
 #   * the "clear" action:         automatic-rename.sh --clear    (strip all prefixes)
+#   * another tool, pinning a tab: automatic-rename.sh pin <dir>  (see "pins" below)
 #
 # The live per-command hooks ship with the plugin under shell/ (hook.zsh,
 # hook.bash, hook.fish); each passes its own shell name to precmd so a bare
@@ -569,6 +570,100 @@ ar_state_prune() { # <keep tab_ids...> - drop entries for tabs that no longer ex
   fi
 }
 
+# ======================================================================
+# pins: a directory another tool has said a tab is ABOUT
+# ======================================================================
+#
+# herdr names a pane by where its foreground process sits, and that is the wrong
+# place for an agent launched from a parent directory and working across the
+# repositories under it: Claude Code started in ~/work and editing ~/work/code/api
+# reports ~/work as its cwd for the whole session, so every such tab reads "work"
+# or, with that directory ignored, nothing. The tool that DOES know (a Claude Code
+# hook watching which files get edited) can pin the tab to that directory:
+#
+#   automatic-rename.sh pin /home/u/work/code/api        # this pane's tab
+#   automatic-rename.sh pin --tab w1:t2 /home/u/work/code/api
+#   automatic-rename.sh pin --clear [--tab <id>]
+#
+# A pin stands in for the pane's directory wherever the engine reads one, so the
+# tab takes its context AND its branch from the pinned checkout, and everything
+# else (the agent's task, the workspace dedupe, the budgets, the numbering) works
+# exactly as it does for a pane that really sits there. A pin is not a rename: the
+# ownership rules are untouched, a tab renamed by hand stays out, and reset works
+# as before. One file per tab under $STATE_DIR/pins, pruned with the state when the
+# tab is gone. Fixed path for the same reason the state is (the shell hooks and
+# any pinning tool run outside herdr's plugin environment).
+PIN_DIR="$STATE_DIR/pins"
+
+# ar_pin_id <tab_id> -> the pin's filename. Tab ids are "w1:t2"; the slash is the
+# one character that cannot sit in a filename and the colon is the one Finder
+# shows as a slash, so both become underscores. clean has already taken the
+# control characters out of any id that reaches here.
+ar_pin_id() {
+  local id=${1//\//_}
+  printf '%s' "${id//:/_}"
+}
+
+# ar_pin_file <tab_id> -> the pin's path.
+ar_pin_file() {
+  printf '%s/%s' "$PIN_DIR" "$(ar_pin_id "$1")"
+}
+
+# ar_pin_get <tab_id> -> the pinned directory on stdout and in AR_PIN, or "".
+# Only an absolute path counts: the file is written by a tool outside this
+# plugin, and anything else would be handed to ar_label as a directory.
+ar_pin_get() {
+  local f dir=""
+  AR_PIN=""
+  f=$(ar_pin_file "$1")
+  [ -f "$f" ] || return 0
+  IFS= read -r dir <"$f" 2>/dev/null || true
+  dir=${dir%/}
+  case $dir in
+    /?*) AR_PIN=$dir; printf '%s' "$dir" ;;
+  esac
+  return 0
+}
+
+# ar_pin_set <tab_id> <directory|""> - write the pin, or remove it for "".
+ar_pin_set() {
+  local f
+  f=$(ar_pin_file "$1")
+  if [ -z "$2" ]; then
+    rm -f "$f" 2>/dev/null || true
+    return 0
+  fi
+  mkdir -p "$PIN_DIR" 2>/dev/null || return 1
+  printf '%s\n' "$2" >"$f.tmp.$$" 2>/dev/null && mv -f "$f.tmp.$$" "$f"
+}
+
+# ar_pin_apply <tab_id> - swap the pinned directory in for AR_PANE_DIR (and its
+# lowercased basename, which the title refusals compare against), when there is
+# one. Called after the pane's facts are known and before the label is computed.
+ar_pin_apply() {
+  ar_pin_get "$1" >/dev/null
+  [ -n "$AR_PIN" ] || return 0
+  AR_PANE_DIR=$AR_PIN
+  ar_case "${AR_PIN##*/}" "$_AR_UPPER" "$_AR_LOWER"
+  AR_PANE_DIR_LC=$AR_CASE
+}
+
+# ar_pin_prune <keep tab_ids...> - drop the pins of tabs that no longer exist.
+# Same contract as ar_state_prune; a directory with nothing in it costs nothing.
+ar_pin_prune() {
+  [ -d "$PIN_DIR" ] || return 0
+  local f id k keep
+  for f in "$PIN_DIR"/*; do
+    [ -f "$f" ] || continue
+    id=${f##*/}
+    keep=0
+    for k in "$@"; do
+      [ "$(ar_pin_id "$k")" = "$id" ] && { keep=1; break; }
+    done
+    [ "$keep" = "1" ] || rm -f "$f" 2>/dev/null || true
+  done
+}
+
 # ar_state_claim <tab_id> <name> <named 0|1> [ws] - record that we own <tab_id> at
 # <name>, unless nothing has changed. State already saying exactly this is the
 # steady state -- every named tab, on every pass -- and ar_state_set rewrites the
@@ -811,6 +906,9 @@ ar_tab_name() {
   if [ -z "${4:-}" ] || [ "$pane" != "$4" ]; then
     ar_pane_facts "$pane"
   fi
+  # A tab another tool has pinned to a directory is named as if its pane sat
+  # there: the agent's cwd is where it was launched, not where it is working.
+  ar_pin_apply "$1"
   # An agent tab is named after the work the agent reports, when it reports any:
   # five claude tabs all read "claude" otherwise, which is the one thing naming
   # them by program cannot fix. This answer also needs no process lookup, so an
@@ -1662,6 +1760,8 @@ ar_reconcile() {
     # argument, so the split is the call. herdr tab ids carry no whitespace.
     # shellcheck disable=SC2086
     [ "$NAME_TABS" = "1" ] && [ -n "$AR_SEEN_TABS" ] && ar_state_prune $AR_SEEN_TABS
+    # shellcheck disable=SC2086 # same word-split list as the line above
+    [ -n "$AR_SEEN_TABS" ] && ar_pin_prune $AR_SEEN_TABS
   fi
   if ar_index_pass agents; then
     ar_renumber_agents
@@ -1720,8 +1820,14 @@ ar_fast_once() {
   # cost a socket round-trip on every command.
   # The branch comes from this shell's own directory, so a checkout switched at
   # the prompt shows up at the next one -- herdr has no event to tell us.
-  ar_branch_of "$PWD" >/dev/null
-  name=$(ar_label "$PWD" "${AR_STATE_WS:-}" "$AR_BRANCH" "$prog" "$cmd")
+  # A pinned tab keeps saying what it is about across the commands typed in it,
+  # so the pin stands in for $PWD here the way it does for the pane's cwd in a
+  # full pass.
+  local dir=$PWD
+  ar_pin_get "$tab" >/dev/null
+  [ -n "$AR_PIN" ] && dir=$AR_PIN
+  ar_branch_of "$dir" >/dev/null
+  name=$(ar_label "$dir" "${AR_STATE_WS:-}" "$AR_BRANCH" "$prog" "$cmd")
   # Empty is a real answer under HIDE_SHELL (name the tab nothing, keeping the
   # number alone when there is one); anywhere else it means we have no name.
   if [ -z "$name" ]; then
@@ -1883,6 +1989,37 @@ ar_main() {
       else
         ar_notify "Clear is waiting" "Another naming pass held the lock. Try again."
       fi
+      ;;
+    pin)
+      # pin [--tab <id>] <directory> | pin [--tab <id>] --clear
+      # The tab defaults to the pane this runs in (HERDR_TAB_ID), which is how a
+      # hook inside an agent's pane addresses its own tab without knowing the id.
+      shift
+      tab="${HERDR_TAB_ID:-}"; dir=""; clear_pin=0
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --tab) tab="${2:-}"; shift 2 ;;
+          --clear) clear_pin=1; shift ;;
+          *) dir="$1"; shift ;;
+        esac
+      done
+      if [ -z "$tab" ]; then
+        echo "pin: no tab (set HERDR_TAB_ID or pass --tab <id>)" >&2; exit 2
+      fi
+      if [ "$clear_pin" = "1" ]; then
+        ar_pin_set "$tab" ""
+      else
+        case "$dir" in
+          /?*) ;;
+          *) echo "pin: need an absolute directory, or --clear" >&2; exit 2 ;;
+        esac
+        ar_pin_set "$tab" "${dir%/}" || exit 1
+      fi
+      # The label follows on the next pass; run one now so it does not wait for
+      # an unrelated event. An event-mode run defers to a holder rather than
+      # blocking the caller, and the holder's loop re-reads the pin.
+      [ "$NAME_TABS" = "1" ] || exit 0
+      ar_run full
       ;;
     tab.closed)
       ar_wait_tab_gone "${HERDR_TAB_ID:-}"   # settle before the reconcile

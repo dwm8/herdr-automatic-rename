@@ -92,6 +92,20 @@ Run one from the CLI, or bind it in `config.toml` as a `plugin_action`:
 herdr plugin action invoke herdr-automatic-rename.reset
 ```
 
+## Pinning a tab to a directory
+
+A tab is named after the directory its foreground process sits in. That is the wrong place for an agent launched from a parent directory and working across the repositories under it: Claude Code started in `~/work` and editing `~/work/code/api` reports `~/work` as its cwd for the whole session. The tool that does know where the work is can say so:
+
+```sh
+bash "$PLUGIN/automatic-rename.sh" pin /home/u/work/code/api      # this pane's tab
+bash "$PLUGIN/automatic-rename.sh" pin --tab w1:t2 /home/u/work/code/api
+bash "$PLUGIN/automatic-rename.sh" pin --clear
+```
+
+The tab is then named as if its pane sat there, branch included: `api › feat/oauth › Fix the token refresh`. Everything else is unchanged, so a tab you renamed by hand stays yours, numbering still applies, and the pin goes when the tab does. `CONTEXT_IGNORE=("$HOME/work")` in `config.sh` is the other half: it keeps the parent directory out of every label that has nothing better to say.
+
+A Claude Code hook that pins each tab to the repository of the file being edited is the setup this was built for; wire `pin` into a `PostToolUse` hook and `pin --clear` into `SessionStart`.
+
 ## Uninstall
 
 Strip the labels first, else `clear`'s renames re-fire the hooks. Then remove the plugin:

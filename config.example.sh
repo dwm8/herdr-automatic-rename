@@ -64,6 +64,20 @@
 # checked out there would read as the remote machine's. The user is dropped,
 # because root@prod-01 and deploy@prod-01 are the same machine.
 
+# Directories that say nothing, the way your home directory says nothing: a tab
+# whose pane sits in one gets no directory in its label. The entry worth making is
+# the directory every project lives under ("~/work", "~/src"). A coding agent
+# launched there and working across the repositories beneath it reports it as its
+# cwd for the whole session, so without this every such tab reads "work › ...".
+# Full paths; $HOME expands because this file is bash. Compared exactly, so a
+# project directory under a listed one still names itself. Default: none.
+#
+# The tab can still be told where the work really is: another tool (a Claude Code
+# hook, say) runs `automatic-rename.sh pin <directory>` from inside the pane, and
+# the tab is named as if its pane sat in that directory, branch included. See
+# "Pinning a tab to a directory" in the README.
+# CONTEXT_IGNORE=("$HOME/work")
+
 # 1 = qualify the context with the branch the pane's repository has checked out:
 # "api › MC-13675 › nvim". It says which slice of a project a tab is on, where
 # the directory alone says only which project.

@@ -381,6 +381,31 @@ ar_fits() {
   [ -n "$n" ] && [ "$n" -le "$2" ]
 }
 
+# Directories that are nowhere in particular, the way $HOME is: a shell parked
+# in one has not said where the work is, so the context is left out rather than
+# spent on a name every tab would carry alike. The usual entry is the directory
+# every project is checked out under ("~/work", "~/src"): an agent launched there
+# and working across several repositories reports it as its cwd, and a bar of
+# tabs all reading "work › ..." says nothing. Full paths, no trailing slash
+# needed; $HOME expands because config.sh is bash. Compared exactly, so a
+# subdirectory of a listed one still names itself.
+if ! declare -p CONTEXT_IGNORE >/dev/null 2>&1; then
+  CONTEXT_IGNORE=()
+fi
+
+# ar_context_ignored <absolute dir, trailing slash removed> -> 0 when the
+# directory is listed in CONTEXT_IGNORE. A listed entry is normalized the same
+# way the directory was, so "~/work/" in the config matches "~/work" on the pane.
+ar_context_ignored() {
+  local d
+  for d in "${CONTEXT_IGNORE[@]}"; do
+    [ -n "$d" ] || continue
+    d=${d%/}
+    [ "$1" = "$d" ] && return 0
+  done
+  return 1
+}
+
 # ar_context_dir <pane directory> <workspace base label> -> the directory part of
 # the context, or "" when the directory says nothing worth a tab's width.
 #
@@ -408,6 +433,7 @@ ar_context_dir() {
   dir=${dir%/}                        # a trailing slash names the same directory
   [ -n "$dir" ] || return 0           # ... and "/" is left with nothing
   [ "$dir" = "${HOME%/}" ] && return 0
+  ar_context_ignored "$dir" && return 0
   base=${dir##*/}
   [ -n "$base" ] || return 0
   if [ -n "$ws" ]; then
