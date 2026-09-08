@@ -122,13 +122,15 @@ ar_transcript_file() {
 # the file inside <INSTRUCTIONS>), the environment it was started in (nothing but
 # an <environment_context> block), and what the user typed. The first is refused
 # by its heading, the second has nothing left once its markup goes, and the third
-# is the answer. Only the first line of a prompt, as with Claude.
+# is the answer. A block is closed by ITS OWN tag (a named backreference), so an
+# <environment_context> holding a <cwd> inside it goes as one piece rather than
+# ending at the inner close. Only the first line of a prompt, as with Claude.
 AR_JQ_CODEX='
 def codex_prompt: select(.type == "response_item" and .payload.type == "message"
     and .payload.role == "user")
   | [ (.payload.content // [])[] | select(.type == "input_text") | .text ] | join(" ")
   | select(startswith("# AGENTS.md") | not)
-  | gsub("(?s)<[A-Za-z][A-Za-z_-]*>.*?</[A-Za-z][A-Za-z_-]*>"; " ")
+  | gsub("(?s)<(?<t>[A-Za-z][A-Za-z_-]*)>.*?</\\k<t>>"; " ")
   | sub("^[[:space:]]+"; "") | split("\n")[0] // "";
 '
 
