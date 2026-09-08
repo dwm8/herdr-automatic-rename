@@ -8,6 +8,8 @@ All notable changes to herdr-automatic-rename are documented here. The format fo
 
 - A tab can be pinned to a directory by another tool: `automatic-rename.sh pin <directory>` from inside the pane (or `--tab <id>` from anywhere), `pin --clear` to undo. The tab is named as if its pane sat in that directory, branch included. It exists for agents launched from a parent directory and working across the repositories under it: Claude Code started in `~/work` reports `~/work` as its cwd however far afield it edits, so a hook that watches which files it touches is what knows where the work is, and this is how it says so. Pins live beside the state file and are pruned with it; ownership, hand renames, and `reset` are untouched.
 
+- Codex tabs are named from the thread's own rollout file, the way Claude tabs are named from their transcript. Codex titles its terminal with the directory name, which the plugin already refused, so every Codex tab read `codex`. The last prompt the user typed is what the thread is about now, and that is what the tab reads; the AGENTS.md instructions and environment context Codex files under the same role are recognised and skipped. Needs `herdr integration install codex`, which is what tells herdr which thread a pane holds.
+
 - `CONTEXT_IGNORE`, directories that say nothing the way the home directory says nothing. The entry worth making is the directory every project is checked out under, so a bar of agent tabs launched there stops reading `work › ...` on every one.
 
 ## [0.8.0] - 2026-08-28

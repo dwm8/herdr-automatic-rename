@@ -107,6 +107,37 @@ cat >"$FILE" <<'JSON'
 JSON
 check "an unmarked transcript still reads" "give-review PR 8806" "$(topic_of "$ID" "$DIR")"
 
+# ---- a Codex rollout ----
+# Codex generates no title and files its prompts as user messages beside the
+# AGENTS.md it read and the environment it started in; the last thing the user
+# typed is what the thread is about now.
+export CODEX_HOME="$SB/codex"
+CID=01a0833d-c20a-7fe3-aa13-2d26c50aeb39
+CDIR="$CODEX_HOME/sessions/2026/09/09"; mkdir -p "$CDIR"
+CFILE="$CDIR/rollout-2026-09-09T06-57-37-$CID.jsonl"
+cat >"$CFILE" <<'JSON'
+{"type":"session_meta","payload":{"id":"01a0833d-c20a-7fe3-aa13-2d26c50aeb39","cwd":"/Users/tester"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\n\n<INSTRUCTIONS>\n# Where files go\n</INSTRUCTIONS>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/Users/tester</cwd>\n</environment_context>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"comment out the CX role from global\n\nand LATAM too"}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}}
+{"type":"event_msg","payload":{"type":"token_count"}}
+JSON
+check "a codex rollout names the tab by its prompt" "comment out the CX role from global" "$(topic_of "$CID" /Users/tester codex)"
+check "codex is folded for comparison too" "comment out the cx role from global" \
+  "$(ar_transcript_topic codex "$CID" /Users/tester && printf '%s' "$AR_TRANSCRIPT_TOPIC_LC")"
+cat >>"$CFILE" <<'JSON'
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"now run the tests"}]}}
+JSON
+check "the LAST codex prompt wins" "now run the tests" "$(topic_of "$CID" /Users/tester codex)"
+check "a claude pane never reads a codex rollout" "-" "$(topic_of "$CID" /Users/tester claude)"
+cat >"$CFILE" <<'JSON'
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\n\n<INSTRUCTIONS>x</INSTRUCTIONS>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}}
+JSON
+check "a codex thread with no prompt says nothing" "-" "$(topic_of "$CID" /Users/tester codex)"
+check "an unknown codex id says nothing" "-" "$(topic_of 01a08080-0836-7382-ad2b-e789dc15fe8c /Users/tester codex)"
+
 # ---- nothing to say ----
 : >"$FILE"
 check "an empty transcript says nothing" "-" "$(topic_of "$ID" "$DIR")"

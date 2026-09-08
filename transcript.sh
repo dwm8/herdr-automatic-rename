@@ -14,7 +14,7 @@
 # command and answered by the agent alone is never given one, and its tab reads
 # "claude" however long it runs.
 #
-# Only Claude Code is read, and the pane's agent is checked rather than assumed:
+# Claude Code and Codex are read, and the pane's agent is checked rather than assumed:
 # every agent keeps its transcript in its own shape and its own place, so another
 # agent's pane carrying a session value -- its own, or one a claude left behind
 # there -- would otherwise put one agent's prompts on another agent's tab. The
@@ -26,8 +26,16 @@
 # through have no reader in sight: the engine next door is what reads them.
 # shellcheck disable=SC2034
 
-# The agent whose transcripts this knows how to read, as herdr names it.
+# The agents whose transcripts this knows how to read, as herdr names them.
+# Claude Code keeps a JSONL per session under its projects directory; Codex keeps
+# a JSONL "rollout" per thread under its sessions directory, filed by date.
 AR_TRANSCRIPT_AGENT=claude
+AR_TRANSCRIPT_AGENT_CODEX=codex
+
+# Where Codex keeps its rollouts. CODEX_HOME is the variable Codex itself honors.
+ar_codex_root() {
+  printf '%s' "${CODEX_HOME:-$HOME/.codex}/sessions"
+}
 
 # Where Claude Code keeps its sessions. The environment variable is what a user
 # who moved it sets, and it is read at call time rather than cached because the
@@ -108,6 +116,59 @@ ar_transcript_file() {
   return 1
 }
 
+# What a Codex rollout line says the user asked for. Codex records the prompt as
+# a user message whose content is input_text blocks, and files three kinds of
+# text under the same role: the AGENTS.md instructions it read (a heading, then
+# the file inside <INSTRUCTIONS>), the environment it was started in (nothing but
+# an <environment_context> block), and what the user typed. The first is refused
+# by its heading, the second has nothing left once its markup goes, and the third
+# is the answer. Only the first line of a prompt, as with Claude.
+AR_JQ_CODEX='
+def codex_prompt: select(.type == "response_item" and .payload.type == "message"
+    and .payload.role == "user")
+  | [ (.payload.content // [])[] | select(.type == "input_text") | .text ] | join(" ")
+  | select(startswith("# AGENTS.md") | not)
+  | gsub("(?s)<[A-Za-z][A-Za-z_-]*>.*?</[A-Za-z][A-Za-z_-]*>"; " ")
+  | sub("^[[:space:]]+"; "") | split("\n")[0] // "";
+'
+
+# ar_codex_file <session id> -> sets AR_TRANSCRIPT_FILE to the rollout of that
+# thread; rc 1 when there is none. Rollouts are filed as
+# sessions/YYYY/MM/DD/rollout-<timestamp>-<id>.jsonl, so the id alone finds one.
+ar_codex_file() {
+  local root match
+  AR_TRANSCRIPT_FILE=""
+  [[ $1 =~ $_AR_SESSION_ID ]] || return 1
+  root=$(ar_codex_root)
+  for match in "$root"/*/*/*/rollout-*-"$1.jsonl"; do
+    if [ -f "$match" ]; then
+      AR_TRANSCRIPT_FILE=$match
+      return 0
+    fi
+  done
+  return 1
+}
+
+# ar_codex_topic <session id> -> AR_TRANSCRIPT_TOPIC / _LC from a Codex rollout.
+# Codex generates no title, so the LAST prompt the user typed is what the thread
+# is about now, read from the end of the file; a rollout whose tail is all tool
+# output falls back to the first prompt, read from the front and stopping there.
+ar_codex_topic() {
+  local row=""
+  ar_codex_file "$1" || return 1
+  row=$(tail -c "$_AR_TRANSCRIPT_TAIL" "$AR_TRANSCRIPT_FILE" 2>/dev/null     | jq -Rrn "$AR_JQ_CLEAN$AR_JQ_TASK$AR_JQ_CODEX"'
+      last(inputs | fromjson? // empty | codex_prompt | task("") | select(length > 0))
+      // empty | [ ., ascii_downcase ] | join([31] | implode)' 2>/dev/null)
+  if [ -z "$row" ]; then
+    row=$(jq -Rrn "$AR_JQ_CLEAN$AR_JQ_TASK$AR_JQ_CODEX"'
+      first(inputs | fromjson? // empty | codex_prompt | task("") | select(length > 0))
+      // empty | [ ., ascii_downcase ] | join([31] | implode)'       <"$AR_TRANSCRIPT_FILE" 2>/dev/null)
+  fi
+  [ -n "$row" ] || return 1
+  IFS=$AR_ROW_SEP read -r AR_TRANSCRIPT_TOPIC AR_TRANSCRIPT_TOPIC_LC <<< "$row"
+  [ -n "$AR_TRANSCRIPT_TOPIC" ]
+}
+
 # ar_transcript_topic <pane agent> <session id> <pane directory>
 #   -> sets AR_TRANSCRIPT_TOPIC to what the session says it is about, and
 #      AR_TRANSCRIPT_TOPIC_LC to the same folded for comparison; rc 1 when it
@@ -131,6 +192,10 @@ ar_transcript_topic() {
   AR_TRANSCRIPT_TOPIC=""
   AR_TRANSCRIPT_TOPIC_LC=""
   [ "${AGENT_TRANSCRIPT:-1}" = "1" ] || return 1
+  if [ "$1" = "$AR_TRANSCRIPT_AGENT_CODEX" ]; then
+    ar_codex_topic "$2"
+    return $?
+  fi
   [ "$1" = "$AR_TRANSCRIPT_AGENT" ] || return 1
   ar_transcript_file "$2" "$3" || return 1
   # `last(inputs)` and `first(inputs)` rather than a trailing `tail -n1`/`head

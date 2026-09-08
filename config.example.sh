@@ -162,15 +162,19 @@
 # 1 = when a coding agent has NOT titled its terminal, read what its own session
 # says it is about. Claude Code derives that title from what you typed, so a
 # session you opened with a slash command and never typed a prompt into is never
-# given one, and its tab reads "claude" for as long as it runs. Only Claude Code
-# is read; any other agent is named from its terminal title exactly as before.
+# given one, and its tab reads "claude" for as long as it runs. Codex titles its
+# terminal with the directory name, which says nothing at all. Claude Code and
+# Codex are read; any other agent is named from its terminal title exactly as
+# before.
 #
-# What it reads is the title Claude Code generated for the session, or failing
-# that your first prompt -- which is what Claude Code's own session list shows
-# for an untitled session. It reads that out of the transcript file on disk, so
-# set this to 0 if you would rather nothing read it. herdr has to have told the
-# plugin which session the pane holds, which is what `herdr integration install
-# claude` sets up; without it there is nothing to read and this does nothing.
+# For Claude Code it reads the title the agent generated for the session, or
+# failing that your first prompt -- which is what Claude Code's own session list
+# shows for an untitled session. For Codex, which generates no title, it reads
+# the last prompt you typed into the thread. Both come out of the transcript file
+# on disk, so set this to 0 if you would rather nothing read it. herdr has to
+# have told the plugin which session the pane holds, which is what `herdr
+# integration install claude` / `... codex` set up; without it there is nothing
+# to read and this does nothing.
 # AGENT_TRANSCRIPT=1
 
 # Truncate a title to this many characters, at a word boundary when that leaves
