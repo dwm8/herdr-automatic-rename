@@ -129,7 +129,7 @@ check "codex is folded for comparison too" "comment out the cx role from global"
 cat >>"$CFILE" <<'JSON'
 {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"now run the tests"}]}}
 JSON
-check "the LAST codex prompt wins" "now run the tests" "$(topic_of "$CID" /Users/tester codex)"
+check "a later codex prompt does not replace the first" "comment out the CX role from global" "$(topic_of "$CID" /Users/tester codex)"
 check "a claude pane never reads a codex rollout" "-" "$(topic_of "$CID" /Users/tester claude)"
 cat >"$CFILE" <<'JSON'
 {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\n\n<INSTRUCTIONS>x</INSTRUCTIONS>"}]}}

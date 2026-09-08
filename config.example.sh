@@ -170,7 +170,7 @@
 # For Claude Code it reads the title the agent generated for the session, or
 # failing that your first prompt -- which is what Claude Code's own session list
 # shows for an untitled session. For Codex, which generates no title, it reads
-# the last prompt you typed into the thread. Both come out of the transcript file
+# the first prompt you typed into the thread. Both come out of the transcript file
 # on disk, so set this to 0 if you would rather nothing read it. herdr has to
 # have told the plugin which session the pane holds, which is what `herdr
 # integration install claude` / `... codex` set up; without it there is nothing

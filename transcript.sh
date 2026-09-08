@@ -150,20 +150,17 @@ ar_codex_file() {
 }
 
 # ar_codex_topic <session id> -> AR_TRANSCRIPT_TOPIC / _LC from a Codex rollout.
-# Codex generates no title, so the LAST prompt the user typed is what the thread
-# is about now, read from the end of the file; a rollout whose tail is all tool
-# output falls back to the first prompt, read from the front and stopping there.
+# Codex generates no title, so the FIRST prompt the user typed names the thread:
+# that is the task, where the last thing typed is as often "yeah, do that". Read
+# from the front and stopping at the first match, so a long rollout costs one
+# partial pass.
 ar_codex_topic() {
   local row=""
   ar_codex_file "$1" || return 1
-  row=$(tail -c "$_AR_TRANSCRIPT_TAIL" "$AR_TRANSCRIPT_FILE" 2>/dev/null     | jq -Rrn "$AR_JQ_CLEAN$AR_JQ_TASK$AR_JQ_CODEX"'
-      last(inputs | fromjson? // empty | codex_prompt | task("") | select(length > 0))
-      // empty | [ ., ascii_downcase ] | join([31] | implode)' 2>/dev/null)
-  if [ -z "$row" ]; then
-    row=$(jq -Rrn "$AR_JQ_CLEAN$AR_JQ_TASK$AR_JQ_CODEX"'
-      first(inputs | fromjson? // empty | codex_prompt | task("") | select(length > 0))
-      // empty | [ ., ascii_downcase ] | join([31] | implode)'       <"$AR_TRANSCRIPT_FILE" 2>/dev/null)
-  fi
+  row=$(jq -Rrn "$AR_JQ_CLEAN$AR_JQ_TASK$AR_JQ_CODEX"'
+    first(inputs | fromjson? // empty | codex_prompt | task("") | select(length > 0))
+    // empty | [ ., ascii_downcase ] | join([31] | implode)' \
+    <"$AR_TRANSCRIPT_FILE" 2>/dev/null)
   [ -n "$row" ] || return 1
   IFS=$AR_ROW_SEP read -r AR_TRANSCRIPT_TOPIC AR_TRANSCRIPT_TOPIC_LC <<< "$row"
   [ -n "$AR_TRANSCRIPT_TOPIC" ]

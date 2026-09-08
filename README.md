@@ -23,7 +23,7 @@ This plugin is highly configurable. See the Configuration section below for more
 
 herdr `>= 0.7.1`, `jq`, and bash, on Linux or macOS. On herdr below `0.7.4` a new name lands but shows only on the next redraw, such as a focus change.
 
-Run `herdr integration install claude` too if you use Claude Code, and `herdr integration install codex` if you use Codex. It tells herdr which session each pane holds, so a Claude session you opened with a slash command and never titled still gets a name, and a Codex thread is named after the last thing you asked it rather than `codex`.
+Run `herdr integration install claude` too if you use Claude Code, and `herdr integration install codex` if you use Codex. It tells herdr which session each pane holds, so a Claude session you opened with a slash command and never titled still gets a name, and a Codex thread is named after what you first asked it rather than `codex`.
 
 ## Install
 
