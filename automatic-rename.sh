@@ -1622,6 +1622,143 @@ ar_renumber_agents() {
   done
 }
 
+# ======================================================================
+# agent names: the model each agent is running (AGENT_MODEL_NAMES)
+# ======================================================================
+#
+# herdr's agents panel names an agent after the program ("claude"), and three
+# panes running claude read alike there however different their models. This
+# pass names each one after the model its session is running, read from the
+# agent's own transcript, so the panel reads "fable / fable-2 / opus / gpt-6-astra".
+#
+# Ownership follows the tab rule, in a store of its own ($AGENTS_FILE, keyed by
+# pane id): a name the panel carries that is not the one this pass last wrote is
+# somebody's own and is left alone (and kept out of the names this pass hands
+# out). herdr refuses a duplicate agent name, so a second agent on the same
+# model takes "-2", and an agent keeps its suffix across passes rather than
+# being renumbered as neighbours come and go. The model is re-read from the
+# transcript at most once a minute per agent; between reads the recorded one
+# stands, since a session that has not changed id has rarely changed model.
+AGENTS_FILE="$STATE_DIR/agents.json"
+AR_MODEL_TTL=60
+
+ar_agents_read() {
+  local base=""
+  if [ -f "$AGENTS_FILE" ] && ! base=$(cat "$AGENTS_FILE" 2>/dev/null); then
+    return 1
+  fi
+  [ -n "$base" ] || { printf '{}'; return 0; }
+  printf '%s' "$base" | jq -c -s \
+    'if length == 1 and (.[0] | type) == "object" then .[0] else {} end' 2>/dev/null \
+    || printf '{}'
+}
+
+# ar_agents_write <json> - replace the store, atomically.
+ar_agents_write() {
+  local tmp
+  tmp=$(mktemp "$STATE_DIR/.agents.XXXXXX") || return 1
+  if printf '%s' "$1" >"$tmp" 2>/dev/null; then mv "$tmp" "$AGENTS_FILE"; else rm -f "$tmp"; return 1; fi
+}
+
+# ar_agent_name_free <base> <used, newline-joined> -> the first of base, base-2,
+# base-3 ... not in the list, kept inside herdr's 32 characters.
+ar_agent_name_free() {
+  local base=$1 used=$2 n=1 cand=$1 stem nl=$'\n'
+  while :; do
+    case "$nl$used$nl" in
+      *"$nl$cand$nl"*) ;;
+      *) printf '%s' "$cand"; return 0 ;;
+    esac
+    n=$(( n + 1 ))
+    stem=${base:0:$(( 32 - ${#n} - 1 ))}
+    cand="${stem%-}-$n"
+  done
+}
+
+ar_name_agents() {
+  local json rows store now pane name agent session dir rec_name rec_model rec_session rec_ts
+  local model base want used="" seen="" changed=0 nl=$'\n'
+  if [ "${AR_HAVE_SNAPSHOT:-0}" = "1" ]; then json="$AR_SNAP_AGENTS_JSON"
+  else json=$("$HERDR" agent list 2>/dev/null) || return 0; fi
+  [ -n "$json" ] || return 0
+  store=$(ar_agents_read) || return 0
+  rows=$(printf '%s' "$json" | jq -r "$AR_JQ_CLEAN"'
+    (.result.agents // .agents // [])[]
+    | [ (.pane_id | clean), (.name | clean), (.agent | clean),
+        (.agent_session.value | clean), ((.foreground_cwd // .cwd) | clean) ]
+    | join([31] | implode)' 2>/dev/null)
+  [ -n "$rows" ] || return 0
+  now=$(date +%s 2>/dev/null || echo 0)
+  # First pass: which names are spoken for. A name that is not what this pass
+  # last wrote for that pane is somebody's own.
+  while IFS=$AR_ROW_SEP read -r pane name agent session dir; do
+    [ -n "$pane" ] || continue
+    [ -n "$name" ] || continue
+    rec_name=$(printf '%s' "$store" | jq -r --arg p "$pane" '.[$p].name // ""')
+    if [ "$CLEAR" = "1" ]; then
+      # Revert the names this pass wrote; leave the rest.
+      [ "$name" = "$rec_name" ] && "$HERDR" agent rename "$pane" --clear >/dev/null 2>&1
+      continue
+    fi
+    [ "$name" = "$rec_name" ] || used="$used${nl}$name"
+  done <<< "$rows"
+  if [ "$CLEAR" = "1" ]; then
+    rm -f "$AGENTS_FILE" 2>/dev/null
+    return 0
+  fi
+  while IFS=$AR_ROW_SEP read -r pane name agent session dir; do
+    [ -n "$pane" ] || continue
+    seen="$seen $pane"
+    IFS=$AR_ROW_SEP read -r rec_name rec_model rec_session rec_ts <<< "$(printf '%s' "$store" \
+      | jq -r --arg p "$pane" '.[$p] | [ (.name // ""), (.model // ""), (.session // ""),
+        ((.ts // 0) | tostring) ] | join([31] | implode)')"
+    # Somebody else's name: never touched, never renamed over.
+    if [ -n "$name" ] && [ -n "$rec_name" ] && [ "$name" != "$rec_name" ]; then continue; fi
+    if [ -n "$name" ] && [ -z "$rec_name" ]; then continue; fi
+    [ -n "$session" ] || continue
+    model=""
+    if [ "$session" = "$rec_session" ] && [ -n "$rec_model" ] \
+       && [ $(( now - ${rec_ts:-0} )) -lt "$AR_MODEL_TTL" ]; then
+      model=$rec_model
+    elif ar_transcript_model "$agent" "$session" "$dir"; then
+      model=$AR_TRANSCRIPT_MODEL
+    elif [ "$session" = "$rec_session" ]; then
+      model=$rec_model              # unreadable this time; what it was stands
+    fi
+    [ -n "$model" ] || continue
+    ar_model_label "$model" >/dev/null || continue
+    base=$AR_MODEL_LABEL
+    # The name it has is kept when it is still the right model, suffix and all.
+    want=""
+    if [ -n "$name" ] && [ "$name" = "$rec_name" ]; then
+      case $name in
+        "$base") want=$name ;;
+        "$base"-[0-9]*) case ${name#"$base"-} in *[!0-9]*) ;; *) want=$name ;; esac ;;
+      esac
+    fi
+    [ -n "$want" ] || want=$(ar_agent_name_free "$base" "$used")
+    used="$used${nl}$want"
+    if [ "$want" != "$name" ]; then
+      "$HERDR" agent rename "$pane" "$want" >/dev/null 2>&1 || continue
+    fi
+    if [ "$want" != "$rec_name" ] || [ "$model" != "$rec_model" ] || [ "$session" != "$rec_session" ] \
+       || [ $(( now - ${rec_ts:-0} )) -ge "$AR_MODEL_TTL" ]; then
+      store=$(printf '%s' "$store" | jq -c --arg p "$pane" --arg n "$want" --arg m "$model" \
+        --arg s "$session" --argjson t "$now" '.[$p] = {name: $n, model: $m, session: $s, ts: $t}')
+      changed=1
+    fi
+  done <<< "$rows"
+  # Panes that are gone take their records with them.
+  local keep
+  keep=$(printf '%s\n' $seen | jq -R . | jq -s .)
+  if [ "$(printf '%s' "$store" | jq --argjson k "$keep" '[keys[] | select(. as $p | $k | index($p) | not)] | length')" != "0" ]; then
+    store=$(printf '%s' "$store" | jq -c --argjson k "$keep" 'with_entries(select(.key as $p | $k | index($p)))')
+    changed=1
+  fi
+  [ "$changed" = "1" ] && ar_agents_write "$store"
+  return 0
+}
+
 # ar_wait_tab_gone <tab_id> - block (bounded ~3s) until a just-closed tab has left
 # herdr's model, so the reconcile that follows never numbers by a stale list.
 # herdr keeps a closing tab in `tab list` until its pane finishes tearing down;
@@ -1765,6 +1902,11 @@ ar_reconcile() {
   fi
   if ar_index_pass agents; then
     ar_renumber_agents
+  fi
+  # The clear arm runs whatever the toggle says, so switching the feature off and
+  # clearing takes the names back down.
+  if [ "${AGENT_MODEL_NAMES:-0}" = "1" ] || [ "$CLEAR" = "1" ]; then
+    ar_name_agents
   fi
   # The force was for this pass. ar_run can loop the reconcile when events land
   # while it runs, and a tab still forced on a later loop is a tab whose opt-out

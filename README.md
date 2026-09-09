@@ -92,6 +92,10 @@ Run one from the CLI, or bind it in `config.toml` as a `plugin_action`:
 herdr plugin action invoke herdr-automatic-rename.reset
 ```
 
+## Naming agents after their model
+
+`AGENT_MODEL_NAMES=1` in `config.sh` renames each agent in herdr's agents panel after the model its session is running, read from the same transcript the task comes from: `fable`, `fable-2`, `opus`, `gpt-6-astra` instead of `claude`, `claude`, `claude`, `codex`. Names you give an agent yourself are left alone, and `MODEL_ALIASES=("gpt-6-astra=astra")` shortens an id you see a lot of.
+
 ## Pinning a tab to a directory
 
 A tab is named after the directory its foreground process sits in. That is the wrong place for an agent launched from a parent directory and working across the repositories under it: Claude Code started in `~/work` and editing `~/work/code/api` reports `~/work` as its cwd for the whole session. The tool that does know where the work is can say so:

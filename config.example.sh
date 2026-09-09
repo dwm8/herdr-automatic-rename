@@ -262,6 +262,24 @@
 # capital reaches the label as written.
 # TITLE_CASE=fold
 
+# 1 = name each agent in herdr's agents panel after the MODEL its session is
+# running ("fable", "opus", "gpt-6-astra") instead of the program ("claude"),
+# which is what tells three claude panes apart there. The model is read from the
+# agent's own transcript (Claude Code and Codex, the same files AGENT_TRANSCRIPT
+# reads), so it needs the same `herdr integration install` and reads nothing
+# without it. herdr takes agent names in lowercase letters, digits, "-" and "_"
+# only and refuses a duplicate, so a second agent on the same model reads
+# "fable-2" and keeps that suffix as neighbours come and go. An agent you named
+# yourself is left alone; "clear" reverts only the names this wrote. Default 0.
+# AGENT_MODEL_NAMES=1
+
+# How a model id becomes an agent name, as "<model id>=<name>" pairs. Without an
+# entry the id is reduced by rule: a leading "claude-" goes, and so does every
+# trailing segment that is only digits ("claude-fable-5-1" -> "fable",
+# "claude-haiku-4-5-20251001" -> "haiku"); anything else is kept whole
+# ("gpt-6-astra"). Assigning the array replaces the default (none).
+# MODEL_ALIASES=("gpt-6-astra=astra")
+
 # Name shown at a bare prompt. Defaults to your $SHELL's basename.
 # SHELL_NAME=zsh
 

@@ -218,3 +218,33 @@ ar_transcript_topic() {
   IFS=$AR_ROW_SEP read -r AR_TRANSCRIPT_TOPIC AR_TRANSCRIPT_TOPIC_LC <<< "$row"
   [ -n "$AR_TRANSCRIPT_TOPIC" ]
 }
+
+# ar_transcript_model <pane agent> <session id> <pane directory>
+#   -> sets AR_TRANSCRIPT_MODEL to the model id the session is running, read
+#      from the end of its transcript; rc 1 when it cannot be read. The end,
+#      because a session can switch models as it goes (/model), and the label
+#      should say what it is running NOW.
+#
+# Claude Code stamps every assistant message with the model that produced it;
+# Codex records the model on each turn's turn_context line.
+ar_transcript_model() {
+  local file="" model=""
+  AR_TRANSCRIPT_MODEL=""
+  if [ "$1" = "$AR_TRANSCRIPT_AGENT" ]; then
+    ar_transcript_file "$2" "$3" || return 1
+    model=$(tail -c "$_AR_TRANSCRIPT_TAIL" "$AR_TRANSCRIPT_FILE" 2>/dev/null \
+      | jq -Rrn 'last(inputs | fromjson? // empty
+          | select(.type == "assistant") | .message.model | strings | select(length > 0))
+        // empty' 2>/dev/null)
+  elif [ "$1" = "$AR_TRANSCRIPT_AGENT_CODEX" ]; then
+    ar_codex_file "$2" || return 1
+    model=$(tail -c "$_AR_TRANSCRIPT_TAIL" "$AR_TRANSCRIPT_FILE" 2>/dev/null \
+      | jq -Rrn 'last(inputs | fromjson? // empty
+          | select(.type == "turn_context") | .payload.model | strings | select(length > 0))
+        // empty' 2>/dev/null)
+  else
+    return 1
+  fi
+  [ -n "$model" ] || return 1
+  AR_TRANSCRIPT_MODEL=$model
+}

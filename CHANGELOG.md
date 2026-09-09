@@ -10,6 +10,8 @@ All notable changes to herdr-automatic-rename are documented here. The format fo
 
 - Codex tabs are named from the thread's own rollout file, the way Claude tabs are named from their transcript. Codex titles its terminal with the directory name, which the plugin already refused, so every Codex tab read `codex`. The first prompt the user typed is the task, and that is what the tab reads; the AGENTS.md instructions and environment context Codex files under the same role are recognised and skipped. Needs `herdr integration install codex`, which is what tells herdr which thread a pane holds.
 
+- `AGENT_MODEL_NAMES=1` names each agent in herdr's agents panel after the model its session is running, read from the transcript the way the task is: `fable`, `fable-2`, `opus`, `gpt-6-astra`. herdr's own name for the agent is the program, and three panes running `claude` on three different models read alike there. herdr refuses a duplicate agent name, so a second agent on the same model takes a suffix and keeps it. A name you gave an agent yourself is never touched, and `clear` reverts only the names this wrote. `MODEL_ALIASES` maps a model id to the name you would rather see. Off by default.
+
 - `CONTEXT_IGNORE`, directories that say nothing the way the home directory says nothing. The entry worth making is the directory every project is checked out under, so a bar of agent tabs launched there stops reading `work › ...` on every one.
 
 ## [0.8.0] - 2026-08-28

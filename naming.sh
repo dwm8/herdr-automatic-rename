@@ -406,6 +406,72 @@ ar_context_ignored() {
   return 1
 }
 
+# ---- agent names from the model in use ----
+# 1 = name each agent in herdr's agents panel after the MODEL its session is
+# running ("fable", "opus", "gpt-6-astra") instead of the program ("claude"). The
+# model is read from the agent's own transcript, so this needs the same herdr
+# integration AGENT_TRANSCRIPT does and reads only Claude Code and Codex. Two
+# agents on one model are told apart with a suffix: "fable", "fable-2". herdr
+# takes agent names in lowercase letters, digits, "-" and "_" only, up to 32
+# characters, and refuses a duplicate, which is where those rules come from. An
+# agent you named yourself is left alone. Default 0.
+: "${AGENT_MODEL_NAMES:=0}"
+
+# How a model id becomes a name, as "<model id>=<name>" pairs. Without an entry
+# the id is reduced by rule: a leading "claude-" goes, and so does every trailing
+# segment that is only digits, so "claude-fable-5-1" is "fable" and
+# "claude-haiku-4-5-20251001" is "haiku"; "gpt-6-astra" is left as it is, since
+# cutting it would lose the name. Assigning the array replaces the default.
+if ! declare -p MODEL_ALIASES >/dev/null 2>&1; then
+  MODEL_ALIASES=()
+fi
+
+# ar_model_label <model id> -> the agent name for it, on stdout and in
+# AR_MODEL_LABEL; rc 1 when nothing usable is left. Always in the shape herdr
+# accepts: ASCII lowercased, anything outside [a-z0-9_-] becomes "-", runs of
+# them collapsed, leading non-letters dropped, cut at 32.
+ar_model_label() {
+  local id=$1 pair name="" out="" c i
+  AR_MODEL_LABEL=""
+  [ -n "$id" ] || return 1
+  for pair in "${MODEL_ALIASES[@]}"; do
+    [ -n "$pair" ] || continue
+    if [ "${pair%%=*}" = "$id" ]; then name=${pair#*=}; break; fi
+  done
+  if [ -z "$name" ]; then
+    name=$id
+    case $name in claude-*) name=${name#claude-} ;; esac
+    while :; do
+      case $name in
+        *-[0-9]*) case ${name##*-} in *[!0-9]*) break ;; *) name=${name%-*} ;; esac ;;
+        *) break ;;
+      esac
+    done
+  fi
+  ar_case "$name" "$_AR_UPPER" "$_AR_LOWER"
+  name=$AR_CASE
+  for (( i = 0; i < ${#name}; i++ )); do
+    c=${name:$i:1}
+    case $c in
+      [a-z0-9_-]) out="$out$c" ;;
+      *) case $out in *-) ;; *) out="$out-" ;; esac ;;
+    esac
+  done
+  while :; do
+    case $out in
+      [a-z]*) break ;;
+      "") return 1 ;;
+      *) out=${out#?} ;;
+    esac
+  done
+  out=${out%-}
+  out=${out:0:32}
+  out=${out%-}
+  [ -n "$out" ] || return 1
+  AR_MODEL_LABEL=$out
+  printf '%s' "$out"
+}
+
 # ar_context_dir <pane directory> <workspace base label> -> the directory part of
 # the context, or "" when the directory says nothing worth a tab's width.
 #
