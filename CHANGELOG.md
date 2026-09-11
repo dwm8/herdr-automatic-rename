@@ -4,6 +4,19 @@ All notable changes to herdr-automatic-rename are documented here. The format fo
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-09-11
+
+This release of the dwm8 fork includes upstream 0.11.0 and the fork's tab pins, Codex transcript titles, ignored context directories, and model-based agent names.
+
+### Changed
+
+- Model-based agent naming joins ownership records once per panel instead of running two additional JSON lookups per named agent on each event. Settled names keep their state file and issue no rename.
+
+### Fixed
+
+- A new agent earlier in the panel avoids a model name already owned by an agent later in the panel, preventing a rejected duplicate rename.
+- Tab pins survive an incomplete tab-list read, following upstream's ownership-state safeguard.
+
 ### Added
 
 - A tab can be pinned to a directory by another tool: `automatic-rename.sh pin <directory>` from inside the pane (or `--tab <id>` from anywhere), `pin --clear` to undo. The tab is named as if its pane sat in that directory, branch included. It exists for agents launched from a parent directory and working across the repositories under it: Claude Code started in `~/work` reports `~/work` as its cwd however far afield it edits, so a hook that watches which files it touches is what knows where the work is, and this is how it says so. Pins live beside the state file and are pruned with it; ownership, hand renames, and `reset` are untouched.

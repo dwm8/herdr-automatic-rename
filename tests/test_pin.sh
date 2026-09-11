@@ -124,7 +124,8 @@ claude_fixture
 mkdir -p "$PINS"; printf '/home/u/work/code/api\n' >"$PINS/w1_t1"; printf '/home/u/x\n' >"$PINS/w1_t9"
 HOME=/home/u run_event tab.focused
 check "a live tab keeps its pin" "/home/u/work/code/api" "$(cat "$PINS/w1_t1")"
-check_rc "a gone tab loses its pin" 1 "$([ -f "$PINS/w1_t9" ]; echo $?)"
+if [ -f "$PINS/w1_t9" ]; then pin_rc=0; else pin_rc=1; fi
+check_rc "a gone tab loses its pin" 1 "$pin_rc"
 teardown
 
 # ======================================================================

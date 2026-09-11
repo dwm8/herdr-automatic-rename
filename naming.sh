@@ -538,6 +538,7 @@ ar_model_label() {
   out=${out:0:32}
   out=${out%-}
   [ -n "$out" ] || return 1
+  # shellcheck disable=SC2034 # read by the engine after sourcing this module
   AR_MODEL_LABEL=$out
   printf '%s' "$out"
 }

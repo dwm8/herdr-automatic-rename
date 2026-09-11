@@ -73,8 +73,10 @@ check "store records the names" "fable-2" "$(jq -r '."w1:pB".name' "$STORE")"
 # second pass with the names landed: nothing to do, suffix kept
 : >"$HERDR_MOCK_LOG"
 agents_fixture fable fable-2 opus gpt-6-astra
+ln "$STORE" "$SB/settled-store"
 HOME=/home/u run_event pane.agent_status_changed
 check "a settled panel issues no rename" "" "$(log)"
+check "a settled panel does not rewrite its store" "same" "$(if [ "$STORE" -ef "$SB/settled-store" ]; then echo same; else echo replaced; fi)"
 # pA closes; pB keeps its -2 rather than being renumbered
 : >"$HERDR_MOCK_LOG"
 fixture snapshot.json <<'JSON'
@@ -121,6 +123,17 @@ setup
 agents_fixture "" "" "" ""
 HOME=/home/u run_event pane.agent_detected
 check "AGENT_MODEL_NAMES defaults off" "" "$(log)"
+teardown
+
+# A new pane before an existing model-name owner must not claim its name.
+setup
+agents_fixture reviewer "" "" ""
+HOME=/home/u run_event pane.agent_detected
+: >"$HERDR_MOCK_LOG"
+agents_fixture "" fable opus gpt-6-astra
+HOME=/home/u run_event pane.agent_detected
+check_contains "new pane avoids an owned name later in the panel" "$(log)" "agent rename w1:pA fable-2"
+check_absent "existing owner keeps its name" "$(log)" "agent rename w1:pB"
 teardown
 
 t_summary

@@ -2214,36 +2214,38 @@ ar_name_agents() {
   else json=$("$HERDR" agent list 2>/dev/null) || return 0; fi
   [ -n "$json" ] || return 0
   store=$(ar_agents_read) || return 0
-  rows=$(printf '%s' "$json" | jq -r "$AR_JQ_CLEAN"'
+  # Join cached ownership once for the panel instead of starting two jq
+  # processes per agent on every event. Both loops read the same snapshot.
+  rows=$(printf '%s' "$json" | jq -r --argjson store "$store" "$AR_JQ_CLEAN"'
     (.result.agents // .agents // [])[]
+    | ($store[.pane_id] // {}) as $rec
     | [ (.pane_id | clean), (.name | clean), (.agent | clean),
-        (.agent_session.value | clean), ((.foreground_cwd // .cwd) | clean) ]
+        (.agent_session.value | clean), ((.foreground_cwd // .cwd) | clean),
+        ($rec.name | clean), ($rec.model | clean), ($rec.session | clean),
+        (($rec.ts // 0) | tostring) ]
     | join([31] | implode)' 2>/dev/null)
   [ -n "$rows" ] || return 0
   now=$(date +%s 2>/dev/null || echo 0)
   # First pass: which names are spoken for. A name that is not what this pass
   # last wrote for that pane is somebody's own.
-  while IFS=$AR_ROW_SEP read -r pane name agent session dir; do
+  while IFS=$AR_ROW_SEP read -r pane name agent session dir rec_name rec_model rec_session rec_ts; do
     [ -n "$pane" ] || continue
     [ -n "$name" ] || continue
-    rec_name=$(printf '%s' "$store" | jq -r --arg p "$pane" '.[$p].name // ""')
     if [ "$CLEAR" = "1" ]; then
       # Revert the names this pass wrote; leave the rest.
       [ "$name" = "$rec_name" ] && "$HERDR" agent rename "$pane" --clear >/dev/null 2>&1
       continue
     fi
-    [ "$name" = "$rec_name" ] || used="$used${nl}$name"
+    # Reserve owned names too: a new pane may precede an existing owner.
+    used="$used${nl}$name"
   done <<< "$rows"
   if [ "$CLEAR" = "1" ]; then
     rm -f "$AGENTS_FILE" 2>/dev/null
     return 0
   fi
-  while IFS=$AR_ROW_SEP read -r pane name agent session dir; do
+  while IFS=$AR_ROW_SEP read -r pane name agent session dir rec_name rec_model rec_session rec_ts; do
     [ -n "$pane" ] || continue
     seen="$seen $pane"
-    IFS=$AR_ROW_SEP read -r rec_name rec_model rec_session rec_ts <<< "$(printf '%s' "$store" \
-      | jq -r --arg p "$pane" '.[$p] | [ (.name // ""), (.model // ""), (.session // ""),
-        ((.ts // 0) | tostring) ] | join([31] | implode)')"
     # Somebody else's name: never touched, never renamed over.
     if [ -n "$name" ] && [ -n "$rec_name" ] && [ "$name" != "$rec_name" ]; then continue; fi
     if [ -n "$name" ] && [ -z "$rec_name" ]; then continue; fi
@@ -2282,7 +2284,7 @@ ar_name_agents() {
   done <<< "$rows"
   # Panes that are gone take their records with them.
   local keep
-  keep=$(printf '%s\n' $seen | jq -R . | jq -s .)
+  keep=$(jq -cn --arg seen "$seen" '$seen | split(" ") | map(select(length > 0))')
   if [ "$(printf '%s' "$store" | jq --argjson k "$keep" '[keys[] | select(. as $p | $k | index($p) | not)] | length')" != "0" ]; then
     store=$(printf '%s' "$store" | jq -c --argjson k "$keep" 'with_entries(select(.key as $p | $k | index($p)))')
     changed=1
