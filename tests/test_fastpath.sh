@@ -182,4 +182,37 @@ export AUTO_INDEX_WORKSPACES=0
 check "workspaces opted out: tab keeps number" "tab rename t1 [1] nvim" "$(log)"
 teardown
 
+
+# ======================================================================
+# The two naming paths on an agent tab. docs/ARCHITECTURE.md, "The two paths
+# have to agree": a hook that named a tab differently from the reconcile would
+# flip it on every prompt, the flicker the fast path exists to avoid. This is
+# the one known exception, and it is recorded here rather than hidden. The fast
+# path names by the command word the moment it starts, and no title exists yet,
+# so the tab reads "claude" (or its alias). The reconcile that follows reads the
+# title the agent set on its terminal and names the tab after the work. The
+# reconcile only ever moves the label forward, from program to task, so nothing
+# flips back. Either path changing its answer fails here, out loud.
+# ======================================================================
+setup
+export AGENT_TITLES=1
+/usr/bin/env bash "$ENGINE" preexec "claude"
+check "fast path: an agent tab is named after the program" "tab rename t1 [1] claude" "$(log)"
+: >"$HERDR_MOCK_LOG"
+# The same tab and pane as herdr reports them a moment later: the label the fast
+# path just wrote, the agent detected, and the title the agent has set since.
+fixture snapshot.json <<'JSON'
+{"result":{"snapshot":{
+  "workspaces":[{"workspace_id":"w1","label":"[1] api"}],
+  "tabs":[{"tab_id":"t1","label":"[1] claude","pane_count":1,"focused":true,"workspace_id":"w1"}],
+  "panes":[{"pane_id":"p1","tab_id":"t1","focused":true,"agent":"claude","agent_status":"working",
+            "terminal_title_stripped":"Fix the revenue query","foreground_cwd":"/home/u/dev/api"}],
+  "agents":[]
+}}}
+JSON
+/usr/bin/env bash "$ENGINE" tab.focused
+check_contains "reconcile: the same tab is named after the title" "$(log)" \
+  "tab rename t1 [1] Fix the revenue query"
+teardown
+
 t_summary

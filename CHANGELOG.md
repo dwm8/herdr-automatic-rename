@@ -14,6 +14,96 @@ All notable changes to herdr-automatic-rename are documented here. The format fo
 
 - `CONTEXT_IGNORE`, directories that say nothing the way the home directory says nothing. The entry worth making is the directory every project is checked out under, so a bar of agent tabs launched there stops reading `work › ...` on every one.
 
+## [0.11.0] - 2026-09-10
+
+### Added
+
+- Workspace labels can be shown under a shorter name than their directory carries. `WORKSPACE_SUBSTITUTE_SETS` is an ordered list of `sed -E` rewrites applied to the name herdr derives from the directory, so `'s|^worktree-|wt-|'` puts `worktree-feature` in the sidebar as `wt-feature`. The rewrite reaches the label and nothing else: the directory and the Git worktree keep their names, and a tab inside that directory still drops the workspace's name out of its own label rather than re-injecting the long spelling it was shortened to lose.
+
+  Only a derived name is rewritten. A name you typed is left alone for good, the same promise the tab opt-out makes, with the same gap in it: herdr exposes no way to tell a typed name from the derivation it happens to match exactly.
+
+  Numbering and rewriting are the two reasons the workspace pass runs, so a rewrite reaches a workspace whose numbering was never turned on. A rewrite is derived fresh every pass rather than built out of the label the last one wrote, so deleting the rules puts the derived names back at the next event by itself. With numbering off there is no next pass to do that, and the labels keep their last rewrite until `clear`.
+
+  `clear` hands back the derived name too, where it used to strip the number off the rewrite and leave that standing. It is documented as the last step before uninstall, after which the plugin that could have restored the label is gone.
+
+  Based on [#15](https://github.com/qu8n/herdr-automatic-rename/pull/15) by @engineersamuel.
+
+## [0.10.0] - 2026-09-10
+
+### Added
+
+- One command installs the plugin and the shell hook: `curl -fsSL .../install.sh | bash`. The hook is what makes a rename land the moment a command starts, and wiring it was a per-shell copy-paste out of the README, so anyone who read past step 1 got the numbering and none of the naming until they matched their shell to the right snippet. `install.sh` reads `$SHELL`, writes the zsh, bash, or fish snippet to that shell's startup file, and installs the plugin first when herdr does not already list it.
+
+  A marker comment in the startup file is what makes a re-run change nothing, so the command doubles as the upgrade path. The snippet it writes globs herdr's managed plugin directory, whose name carries a version hash, and spells the home directory as `$HOME` so the startup file survives being carried to another machine. A shell argument (`bash install.sh fish`) wires a second shell and `HAR_RC` names a startup file other than the default, which is what a macOS login shell reading `~/.bash_profile` needs. Run from a clone rather than curl'd, the hook points at the checkout and the plugin half is left alone, since herdr owns that copy.
+
+  The two steps it will not take behind your back, turning off herdr's new-tab name prompt and installing the agent integrations, it prints when it finishes. The manual snippets are still in the README, folded away.
+
+- A `doctor` action. It runs one real naming pass with tracing on and prints, for the current tab, the versions and paths in play, the tab's ownership record, the label it carries, and every decision that pass made about it. Until now every failure looked the same from outside: nothing happened. A tab that opted out after a hand rename, a placeholder deferred, a title refused, a lock held by a dead process, and a `jq` that was never installed all produced the same silence, and the issues filed against this plugin were mostly the reporter reasoning backwards from that silence. `herdr plugin action invoke herdr-automatic-rename.doctor` runs it, and the README has a Troubleshooting section keyed to what the tab bar shows.
+
+  `AR_TRACE=1` in herdr's environment writes the same decisions for every pass to `trace.log` in the state directory, at 0600 since a label can carry a task title.
+
+### Fixed
+
+- Ownership records survive a pass that could not read everything. A tab whose record goes missing reads as renamed by hand on the next pass and opts out of naming for good, so every path that dropped one without cause was a permanent bug. A workspace whose tab list failed to read had every tab pruned. An empty workspace keep list pruned every workspace record. A store with one hand-edited key emptied every record after it. A `jq` that crashed read as a broken file and healed a good store to nothing, and on Debian's jq 1.6 a truncated file was never healed at all, since that release reports a parse error with a different status. Each of those now leaves the records alone, and the store is rewritten only when a record actually changed rather than on every event.
+
+- The shell hook scrubs the workspace name it derives from `$PWD`. A directory name holding a control character reached `herdr workspace rename` raw. herdr handed the label back normalized, which read as a name somebody typed and opted the workspace out of directory tracking, with no `reset` to bring it back. The tab half already scrubbed for this and the workspace half now does the same.
+
+- `agent_panel_sort = "spaces"  # or "priority"` in `config.toml` reads as `spaces`. The comment used to be part of the value, and the word `priority` anywhere on the line stripped every agent number.
+
+- `SUBSTITUTE_SETS` is documented as acting on the program name or command line, which is what it does. The comment said the final label, and PR #15 was written against that wording. The README says that untitled Claude Code tabs are named by reading the session transcript, and how to turn that off, and it writes `MAX_TITLE_LEN`'s default as the derivation it is rather than the number it happens to be.
+
+### Changed
+
+- A steady-state event spawns fewer processes. The state file is read once per pass rather than once per tab, `herdr --version` is asked once per process, the rename the plugin itself issues no longer buys a second full pass through the `tab.renamed` event it fires, and the wait for a closing tab backs off over about two seconds instead of polling sixty times.
+
+- The test suite runs its files in parallel, about twenty seconds instead of forty-five. `./tests/run.sh --serial` restores the old order. CI pins its actions by commit and checks the shellcheck download against a recorded digest, and markdownlint now refuses an em dash, which `CONTRIBUTING.md` already did.
+
+## [0.9.1] - 2026-09-09
+
+### Fixed
+
+- Workspace numbers follow a collapsed space again on herdr 0.9.0. That release moved the terminal UI into each client and the sidebar's collapse state with it, so the array the plugin read, `collapsed_space_keys` in `session.json`, is now written empty whatever the sidebar shows. Every collapsed space read as expanded: the hidden rows kept a number no keybind reaches, and every row below one carried a number that jumped somewhere else.
+
+  Collapse is read from the file the client writes it to instead, `client-shell/local-<hash>.json` under herdr's state directory, whose name is the FNV-1a 64 of the client socket path herdr derives from the socket path it already exports to us. An older herdr writes no such file, which is what picks the source: the file that is there, not a version test, so numbering on herdr below 0.9.0 is unchanged. The agent panel's sort order moved the same way and is read the same way, which matters only to a herdr old enough to number agents at all.
+
+  The click now reaches the plugin faster than it did. herdr wrote `session.json` on a five-second debounce and writes this file the instant a space is toggled, so the pass that runs after the click reads the new value rather than the old one. Two limits are new. The file is one per session socket rather than one per client, so two clients on one session share it and the last writer wins. A client narrow enough for herdr's mobile layout ignores collapse altogether, without writing that down anywhere.
+
+- A Muse tab is named after the agent. herdr 0.9.0 detects Muse, which installs as `muse-bin-<version>` and never runs under a plain name, so a pane herdr had not yet detected reached the tab bar as `muse-bin-0.1.0-R708.1` wearing the glyph for an unknown program. The versioned name is folded onto `muse` the way herdr folds it, a digit required after the prefix so an unrelated `muse-binary` keeps its own name. The fold runs ahead of the alias lookup, the program lists and the icon map, so one `PROGRAM_ALIASES` entry names Muse however it was installed. `muse`, `muse-cli` and `muse-code` are listed alongside the other agents.
+
+## [0.9.0] - 2026-09-08
+
+### Added
+
+- An agent's title is condensed into its keywords instead of shown with the tail cut off. `MAX_TITLE_LEN` takes the END off a title, which is where the words saying WHICH task this is tend to sit: "Investigate why the nightly ETL job drops rows" reached a tab as "Investigate why the nightly". `TITLE_CONDENSE=1` drops a leading verb and the filler and joins what is left, so the same budget carries "nightly-ETL-job-drops-rows".
+
+  It selects rather than generates. The words are the agent's own, in the order it wrote them, on the reasoning that it put the salient ones first. `TITLE_LEAD_VERBS` and `TITLE_FILLER_WORDS` are the two lists, measured against the last title Claude Code generated in each of 65 titled sessions rather than written from imagination, and `TITLE_WORD_SEPARATOR` and `TITLE_CASE` say what the surviving words are joined and cased with. A condensed label is charged to `MAX_TITLE_LEN` like any other, the icon glyph and its space reserved out of it first.
+
+  Off by default, so a config that does not name it renders exactly what `AGENT_TITLES` rendered before. A title that condenses to nothing is left as the sentence, and so is one whose label would come out longer than the prose or wearing a leading "[12]", the shape a tab number has.
+
+- The agent is shown alongside its task, `cc:auth-flow` where a tab read `auth-flow`. Which agent is on a task was not recoverable from an agent tab: every agent herdr detects draws the same robot glyph, deliberately, and a title then replaced the one place the program name appeared. That costs a session running one agent nothing, and in a session running three it is what tells two tabs apart.
+
+  `TITLE_STYLE=name_and_task` asks for it and `PROGRAM_ALIASES` applies, since asking for the name is asking for the name you chose for it. The name and its colon are charged to `MAX_TITLE_LEN`, so the task gives up the characters rather than the tab growing. The prefix is all or nothing: it goes in only where the budget seats the name, its colon and `MIN_TASK_LEN` characters of task, and otherwise the name is what goes, because this asks for the task with the name added rather than the other way about. The glyph and its space are part of that budget where icons are on, and an alias carrying a space is never used as a prefix, truncation having cut such a name in half and left the tab reading a fragment of it.
+
+  Off by default. A refused title is not prefixed either, "cc:cc" saying nothing twice.
+
+### Fixed
+
+- The workspace name follows the shell's directory ([#20](https://github.com/qu8n/herdr-automatic-rename/issues/20)). A `cd` emits no herdr event, so a workspace kept the name of the directory it was created in until something unrelated woke the plugin, while the tab beside it moved at the next prompt. The shell hook is the one thing that does fire on a cd, and it renamed only the tab.
+
+  It now names the workspace from the same prompt, by the rules the reconcile uses: the directory is the shell's own `$PWD`, the base is the repository that directory belongs to or the directory itself, and a workspace somebody named by hand is numbered and nothing else. A quiet prompt costs one state read and no herdr call, since the base we own is recorded and only a cd that leaves the project has anything to ask. A workspace the plugin has not adopted is left to the next event, adopting one meaning a round-trip on every prompt.
+
+  Only the tab the workspace is on moves it, since herdr tracks a workspace's directory through its active pane and a prompt drawn in a background tab is about somewhere else. Panes with no shell hook installed are unchanged, and so is the five-second wait for herdr to persist a brand-new workspace.
+
+- One `PROGRAM_ALIASES` entry now names an agent however it was installed ([#19](https://github.com/qu8n/herdr-automatic-rename/issues/19)). Two agents answer to two names, `cursor-agent`, which herdr calls `cursor`, and `kiro-cli`, which it calls `kiro`, and which of the two reaches naming says only how the agent was installed. A native install arrives as its own executable, an npm-fronted one as the kind herdr detected behind the runtime. Keyed by exact name, one config labelled the two panes differently: `cu` where the alias matched, `cursor` where it did not.
+
+  An alias is now looked up under both spellings, the exact name first, so a config naming each separately still gets each. The pair is read off the agent list that already carries both spellings rather than out of a second table somebody would have to keep in step with it.
+
+- Two herdr sessions no longer share one state store ([#22](https://github.com/qu8n/herdr-automatic-rename/issues/22)). Every server numbers its tabs from `w1:t1`, so the plugin running under `herdr --session work` and the one under `herdr --session home` wrote the same keys into the same `state.json`, and each full pass pruned the other session's tabs as closed. A tab whose record is gone reads as renamed by hand on the next pass and opts out of naming until reset, which is how a machine running more than one session ended up with every tab frozen on whatever it was called when the other session last ran, and the lock they also shared dropped events on top of that.
+
+  A named session now keeps its store under `sessions/<name>/` inside the state directory, resolved the way the herdr CLI picks its server: from the session directory in the socket path herdr exports to plugin commands and pane environments alike, or from `HERDR_SESSION` when no socket path is set, so the herdr-invoked pass and the shell hooks resolve one file. The default session keeps the store where it always was.
+
+  Upgrading costs nothing in the common case. A named session's store is created once from the owned records of the old shared one, so a tab the plugin was naming goes on being named. A record the shared store got wrong, which on a multi-session machine is most of them, ends where an empty store would put it: a tab whose label matches nothing the store owns is opted out, and the reset action or clearing the label hands it back as before. Nothing removes a session's store when the session is deleted, and the old shared file stays as the default session's; both are safe to delete by hand.
+
 ## [0.8.0] - 2026-08-28
 
 ### Added
@@ -248,7 +338,11 @@ First public release.
 - Configuration via `~/.config/herdr-automatic-rename/config.sh` (or `$HERDR_AUTOMATIC_RENAME_CONFIG`), with a documented `config.example.sh`.
 - A self-contained test suite (bash + jq only) covering naming, prefix helpers, the state machine, the shell hooks, and a full reconcile against a fake herdr.
 
-[Unreleased]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.9.1...v0.10.0
+[0.9.1]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/qu8n/herdr-automatic-rename/compare/v0.7.1...v0.7.2

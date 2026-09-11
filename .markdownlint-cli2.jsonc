@@ -1,7 +1,10 @@
 {
-  "customRules": [".github/markdownlint-rules/no-hard-wrap.js"],
+  "customRules": [
+    ".github/markdownlint-rules/no-hard-wrap.js",
+    ".github/markdownlint-rules/no-em-dash.js"
+  ],
   "globs": ["**/*.md"],
-  "ignores": ["tmp/**", ".claude/**", "node_modules/**"],
+  "ignores": ["tmp/**", "plans/**", ".claude/**", "node_modules/**"],
   "config": {
     "default": true,
     // Prose is never hard-wrapped here, so a line-length cap is the one thing
@@ -15,6 +18,7 @@
     "MD038": false,
     // The README's screenshot is an <img> for its width and height attributes.
     "MD033": false,
-    "no-hard-wrap": true
+    "no-hard-wrap": true,
+    "no-em-dash": true
   }
 }

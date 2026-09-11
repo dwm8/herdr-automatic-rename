@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# Nothing here writes to the repo, so the token gets read access and no more.
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -15,7 +19,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # zsh and fish make the hook classification tests run instead of skipping
       # (macOS already ships zsh).
@@ -41,7 +45,7 @@ jobs:
       # suffix, so a glob misses it.
       - name: Syntax check
         run: |
-          for f in automatic-rename.sh naming.sh icons.sh git.sh transcript.sh config.example.sh shell/hook.bash \
+          for f in automatic-rename.sh naming.sh icons.sh git.sh transcript.sh config.example.sh install.sh shell/hook.bash \
                    tests/run.sh tests/lib.sh tests/test_*.sh tests/mocks/herdr; do
             /bin/bash -n "$f"
           done
@@ -54,9 +58,9 @@ jobs:
   markdown:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
 
@@ -77,23 +81,27 @@ jobs:
   shellcheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # A pinned release, not apt-get's. ubuntu-noble packages 0.9.0 while a
       # contributor's brew is on 0.11.0, and the two disagree about real
       # findings (SC2218 among them), so an unpinned job fails on what no local
       # run could reproduce. The version lives in the Makefile, which the
-      # pre-commit hook reads too.
+      # pre-commit hook reads too. The pin fixes the version, the digest beside
+      # it fixes the bytes: a tarball that does not match never reaches PATH.
       - name: Install shellcheck
         run: |
           v="$(make -s print-shellcheck-version)"
-          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v$v/shellcheck-v$v.linux.x86_64.tar.xz" \
-            | sudo tar -xJ --strip-components=1 -C /usr/local/bin "shellcheck-v$v/shellcheck"
+          sum="$(make -s print-shellcheck-sha256)"
+          curl -fsSL -o shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v$v/shellcheck-v$v.linux.x86_64.tar.xz"
+          echo "$sum  shellcheck.tar.xz" | sha256sum -c -
+          sudo tar -xJ --strip-components=1 -C /usr/local/bin -f shellcheck.tar.xz "shellcheck-v$v/shellcheck"
 
       - name: Version
         run: shellcheck --version
 
       - name: Lint shell sources
         run: |
-          shellcheck -x -s bash automatic-rename.sh naming.sh icons.sh git.sh transcript.sh config.example.sh \
+          shellcheck -x -s bash automatic-rename.sh naming.sh icons.sh git.sh transcript.sh config.example.sh install.sh \
             shell/hook.bash tests/*.sh tests/mocks/herdr

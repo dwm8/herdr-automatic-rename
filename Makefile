@@ -1,11 +1,15 @@
 # herdr-automatic-rename developer tasks.
 
-.PHONY: test lint lint-sh lint-md syntax hooks print-shellcheck-version
+.PHONY: test lint lint-sh lint-md syntax hooks print-shellcheck-version print-shellcheck-sha256
 
 # The one place the shellcheck version is written down. CI downloads exactly
 # this release, so bumping it here is the whole bump. Findings move between
 # versions, so a local run on anything else can disagree with CI.
 SHELLCHECK_VERSION := 0.11.0
+# sha256 of shellcheck-v$(SHELLCHECK_VERSION).linux.x86_64.tar.xz, the tarball
+# CI downloads. The version pin says which release, the digest says which bytes,
+# so a swapped tarball fails the job. The two move together: bump one, bump both.
+SHELLCHECK_SHA256 := 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
 
 # Run the full test suite (needs bash + jq only).
 test:
@@ -28,7 +32,7 @@ lint-sh:
 		have=$$(shellcheck --version | sed -n 's/^version: //p'); \
 		[ "$$have" = "$(SHELLCHECK_VERSION)" ] || \
 			echo "warning: shellcheck $$have, CI runs $(SHELLCHECK_VERSION)"; \
-		shellcheck -x -s bash automatic-rename.sh naming.sh icons.sh git.sh transcript.sh config.example.sh \
+		shellcheck -x -s bash automatic-rename.sh naming.sh icons.sh git.sh transcript.sh config.example.sh install.sh \
 			shell/hook.bash tests/*.sh tests/mocks/herdr; \
 	else \
 		echo "shellcheck not installed; skipping"; \
@@ -49,7 +53,7 @@ lint-md:
 # and hook.fish are not bash, so each gets its own interpreter, and each is
 # skipped when that shell is absent (CI always has both).
 syntax:
-	@for f in automatic-rename.sh naming.sh icons.sh git.sh transcript.sh config.example.sh shell/hook.bash \
+	@for f in automatic-rename.sh naming.sh icons.sh git.sh transcript.sh config.example.sh install.sh shell/hook.bash \
 	          tests/run.sh tests/lib.sh tests/test_*.sh tests/mocks/herdr; do \
 		/bin/bash -n "$$f" || exit 1; \
 	done
@@ -68,3 +72,6 @@ hooks:
 # For the CI job, which installs the pinned release rather than the distro's.
 print-shellcheck-version:
 	@echo $(SHELLCHECK_VERSION)
+
+print-shellcheck-sha256:
+	@echo $(SHELLCHECK_SHA256)

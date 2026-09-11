@@ -9,6 +9,7 @@ The suite needs only `bash` and `jq`:
 ```sh
 ./tests/run.sh            # everything
 ./tests/run.sh <part>     # only files matching *<part>*, e.g. ./tests/run.sh git
+./tests/run.sh --serial   # one file at a time, when a parallel run hides an interaction
 make test                 # same as ./tests/run.sh
 ```
 
@@ -28,7 +29,7 @@ git commit --no-verify    # skip it for one commit
 
 Each hook only fires when a file it cares about is staged, so a docs-only commit pays for markdownlint and nothing else. One caveat: `shellcheck` and `npx` are skipped rather than failed when they are not installed locally, so a green hook on a machine without them says less than it looks like.
 
-CI installs the exact shellcheck release named by `SHELLCHECK_VERSION` in the Makefile, because findings move between versions (an SC2218 that 0.9.0 reports, 0.11.0 does not). `make lint-sh` warns when your local shellcheck is a different version. To bump it, edit that one variable.
+CI installs the exact shellcheck release named by `SHELLCHECK_VERSION` in the Makefile, because findings move between versions (an SC2218 that 0.9.0 reports, 0.11.0 does not). `make lint-sh` warns when your local shellcheck is a different version. To bump it, edit that variable and the `SHELLCHECK_SHA256` beside it, the sha256 of the new release's `linux.x86_64.tar.xz`, which CI checks before it installs anything.
 
 ## Ground rules
 

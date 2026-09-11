@@ -461,4 +461,50 @@ check_contains "the program names the tab" "$out" "tab rename w1:t1 codex"
 check_absent   "another agent's transcript is not read" "$out" "Belongs to claude"
 teardown
 
+# ======================================================================
+# Scenario 14: a workspace rewritten by WORKSPACE_SUBSTITUTE_SETS still swallows
+#   its own name out of its tabs. The rewrite is the sidebar's alone -- the
+#   directory is still called what it is called -- so the tabs go on deduping
+#   against the DERIVED name. Deduping against the rewrite instead would have a
+#   tab in worktree-feature/ re-inject the long spelling the sidebar was
+#   shortened to lose ("worktree-feature > nvim" under a "wt-feature" heading).
+# ======================================================================
+setup
+printf "WORKSPACE_SUBSTITUTE_SETS=('s|^worktree-|wt-|')\n" \
+  >"$HERDR_AUTOMATIC_RENAME_CONFIG"
+printf '{"version":7,"collapsed_space_keys":[],"workspaces":[
+  {"id":"w1","label":null,"identity_cwd":"/home/u/dev/worktree-feature"}]}\n' \
+  >"$SB/session.json"
+fixture snapshot.json <<'JSON'
+{"result":{"snapshot":{
+  "workspaces":[{"workspace_id":"w1","label":"worktree-feature"}],
+  "tabs":[
+    {"tab_id":"w1:t1","label":"1","pane_count":1,"focused":true,"workspace_id":"w1"},
+    {"tab_id":"w1:t2","label":"2","pane_count":1,"focused":false,"workspace_id":"w1"}
+  ],
+  "panes":[
+    {"pane_id":"p1","tab_id":"w1:t1","focused":true,"cwd":"/home/u/dev/worktree-feature"},
+    {"pane_id":"p2","tab_id":"w1:t2","focused":true,"cwd":"/home/u/dev/worktree-feature/web"}
+  ],
+  "layouts":[
+    {"tab_id":"w1:t1","focused_pane_id":"p1"},
+    {"tab_id":"w1:t2","focused_pane_id":"p2"}
+  ]
+}}}
+JSON
+fixture procinfo_p1.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":100,
+  "foreground_processes":[{"pid":100,"argv0":"nvim","cmdline":"nvim README.md"}]}}}
+JSON
+fixture procinfo_p2.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":200,
+  "foreground_processes":[{"pid":200,"argv0":"nvim","cmdline":"nvim main.go"}]}}}
+JSON
+HOME=/home/u run_event tab.focused
+out=$(log)
+check_contains "the workspace wears the rewrite" "$out" "workspace rename w1 wt-feature"
+check_contains "and its tabs still drop its directory" "$out" "tab rename w1:t1 nvim"
+check_contains "a subdirectory still says which" "$out" "tab rename w1:t2 web${SEP}nvim"
+teardown
+
 t_summary

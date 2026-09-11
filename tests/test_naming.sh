@@ -30,13 +30,36 @@ check "git is name-only" "git" "$(ar_format 'git' 'git status')"
 
 # NAME_ONLY_PROGRAMS only bites with SHOW_PROGRAM_ARGS=1 (0 is the default and
 # already renders bare names), so assert these there. Covers the agents herdr
-# 0.8.0 detects, including the two whose executable differs from its --kind id.
+# 0.9.0 detects, including the three whose executable differs from its --kind id.
 check "grok is name-only" "grok" "$(SHOW_PROGRAM_ARGS=1 ar_format 'grok' 'grok --model x')"
 check "agy is name-only" "agy" "$(SHOW_PROGRAM_ARGS=1 ar_format 'agy' 'agy --conversation 12')"
 check "opencode is name-only" "opencode" "$(SHOW_PROGRAM_ARGS=1 ar_format 'opencode' 'opencode run x')"
 check "cursor-agent name-only" "cursor-agent" "$(SHOW_PROGRAM_ARGS=1 ar_format 'cursor-agent' 'cursor-agent -p x')"
 check "kiro-cli is name-only" "kiro-cli" "$(SHOW_PROGRAM_ARGS=1 ar_format 'kiro-cli' 'kiro-cli chat')"
 check "gemini is name-only" "gemini" "$(SHOW_PROGRAM_ARGS=1 ar_format 'gemini' 'gemini -p hi')"
+check "muse is name-only" "muse" "$(SHOW_PROGRAM_ARGS=1 ar_format 'muse' 'muse --resume')"
+check "muse-cli is name-only" "muse-cli" "$(SHOW_PROGRAM_ARGS=1 ar_format 'muse-cli' 'muse-cli chat')"
+check "muse-code is name-only" "muse-code" "$(SHOW_PROGRAM_ARGS=1 ar_format 'muse-code' 'muse-code run')"
+
+# Muse only ever runs as muse-bin-<version>, which no list can carry, so the
+# fold onto herdr's own kind happens before every rule that keys on the name.
+check "a versioned muse binary is named muse" "muse" \
+  "$(SHOW_PROGRAM_ARGS=1 ar_format 'muse-bin-0.1.0-R708.1' 'muse-bin-0.1.0-R708.1 --resume')"
+check "and takes the alias set for muse" "ms" "$(
+  PROGRAM_ALIASES=("muse=ms")
+  ar_format 'muse-bin-1.2.3' 'muse-bin-1.2.3'
+)"
+# herdr asks for a digit right after the prefix, so an unrelated binary that
+# merely starts the same way keeps its own name.
+check "muse-binary is not Muse" "muse-binary" \
+  "$(SHOW_PROGRAM_ARGS=0 ar_format 'muse-binary' 'muse-binary -x')"
+check "a bare muse-bin is not Muse either" "muse-bin" \
+  "$(SHOW_PROGRAM_ARGS=0 ar_format 'muse-bin' 'muse-bin')"
+# The fold sits ahead of the icon lookup too, so a versioned install draws the
+# robot every other agent draws instead of the fallback. (The glyph itself is
+# pinned by the icon section below, which reads its roster off the same list.)
+check "a versioned muse binary draws the agent glyph" "$(printf '\363\260\232\251') muse" \
+  "$(ICONS_ENABLED=1 ar_format 'muse-bin-0.1.0-R708.1' 'muse-bin-0.1.0-R708.1')"
 
 # ---- ignored programs keep showing the shell ----
 check "ls is ignored -> shell" "zsh" "$(ar_format 'ls' 'ls -la')"
@@ -51,6 +74,26 @@ check "regular program, args off -> name only" "psql" "$(SHOW_PROGRAM_ARGS=0 ar_
 PROGRAM_ALIASES=("clx=hn" "lazygit=lg")
 check "alias clx->hn" "hn" "$(ar_format 'clx' 'clx --nerdfonts')"
 check "alias lazygit->lg" "lg" "$(ar_format 'lazygit' 'lazygit')"
+PROGRAM_ALIASES=()
+
+# An agent whose executable differs from herdr's kind reaches ar_format under
+# either spelling, depending on how it was installed (the WRAPPER_PROGRAMS path
+# substitutes the kind), so one alias entry has to answer for both (issue #19).
+PROGRAM_ALIASES=("cursor-agent=cu")
+check "alias by executable, natively installed" "cu" "$(ar_format 'cursor-agent' 'cursor-agent')"
+check "alias by executable, kind substituted" "cu" "$(ar_format 'cursor' 'cursor')"
+PROGRAM_ALIASES=("kiro=k")
+check "alias by kind, kind substituted" "k" "$(ar_format 'kiro' 'kiro')"
+check "alias by kind, natively installed" "k" "$(ar_format 'kiro-cli' 'kiro-cli')"
+# Only the two spellings of one agent are the same agent. A program that merely
+# ends in the same suffix keeps its own name.
+PROGRAM_ALIASES=("cursor-agent=cu")
+check "another program is not the same agent" "sourcegraph" "$(ar_format 'sourcegraph' 'sourcegraph')"
+PROGRAM_ALIASES=("git=g")
+check "an unsuffixed program takes no alternate" "gitui" "$(ar_format 'gitui' 'gitui')"
+# Both spellings have to be listed, which is what makes them one agent's two
+# names: a suffix alone would hand an unrelated git-cli whatever git is aliased to.
+check "a suffix is not a pairing on its own" "git-cli" "$(SHOW_PROGRAM_ARGS=0 ar_format 'git-cli' 'git-cli')"
 PROGRAM_ALIASES=()
 
 # ---- substitutions ----
@@ -559,6 +602,25 @@ check "an alias that scrubs to nothing is no prefix" "auth flow" \
   "$(PROGRAM_ALIASES=("claude= "); TITLE_STYLE=name_and_task ar_format 'claude' '' 'auth flow')"
 check "an unknown style reads as task" "auth flow" \
   "$(TITLE_STYLE=sideways ar_format 'claude' '' 'auth flow')"
+
+# The glyph and its space come out of the same budget, and after the prefix was
+# decided: the floor was short by their width on every iconned tab, so a task of
+# four characters shipped where seven was promised.
+check "the glyph is charged to the prefix floor" "$(printf '\363\260\232\251') auth flow rewrite" \
+  "$(ICONS_ENABLED=1 MAX_TITLE_LEN=20 TITLE_STYLE=name_and_task ar_format 'cursor-agent' '' 'auth flow rewrite')"
+check "and a budget that seats both still does" "$(printf '\363\260\232\251') claude:auth flow" \
+  "$(ICONS_ENABLED=1 MAX_TITLE_LEN=28 TITLE_STYLE=name_and_task ar_format 'claude' '' 'auth flow')"
+# ICON_STYLE=name draws no glyph, so there is nothing to charge for.
+check "no glyph drawn charges nothing" "cursor-agent:auth" \
+  "$(ICONS_ENABLED=1 ICON_STYLE=name MAX_TITLE_LEN=20 TITLE_STYLE=name_and_task ar_format 'cursor-agent' '' 'auth flow rewrite')"
+
+# A multiword name is refused whatever the budget, not only when it is too wide
+# for one: the trim cuts at the LAST space in the label, which is inside such a
+# name, and it took the task with it -- "SuperLongAgent" alone on the tab.
+check "a multiword name is refused" "authenticationflowrefactoring" \
+  "$(PROGRAM_ALIASES=("claude=SuperLongAgent Extra"); MAX_TITLE_LEN=29 TITLE_STYLE=name_and_task ar_format 'claude' '' 'authenticationflowrefactoring')"
+check "even where it would have fitted" "auth flow" \
+  "$(PROGRAM_ALIASES=("claude=Claude Code"); MAX_TITLE_LEN=28 TITLE_STYLE=name_and_task ar_format 'claude' '' 'auth flow')"
 # The title is taken ahead of PROGRAM_ALIASES on purpose. An alias shortening
 # "claude" to "cl" asks for a tidier program name, not for the work to be hidden;
 # AGENT_TITLES=0 is the knob for wanting program names, and the pair below pins

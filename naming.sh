@@ -149,12 +149,14 @@ declare -p SHELLS >/dev/null 2>&1 || SHELLS=(zsh bash sh fish dash ksh)
 # included so an agent tab reads as "claude" rather than its full invocation.
 #
 # The agent entries are the executable names herdr itself detects as interactive
-# agents (src/detect/mod.rs, herdr 0.8.2). Two differ from herdr's --kind id and
-# both spellings are listed: cursor-agent (kind "cursor") and kiro-cli (kind
-# "kiro"). aider is not a herdr agent kind but is a real agent, so it stays.
+# agents (src/detect/mod.rs, herdr 0.9.0). Three differ from herdr's --kind id
+# and every spelling is listed: cursor-agent (kind "cursor"), kiro-cli (kind
+# "kiro"), and muse-cli / muse-code (kind "muse", whose fourth spelling is the
+# versioned binary ar_format folds -- see there). aider is not a herdr agent kind
+# but is a real agent, so it stays.
 declare -p NAME_ONLY_PROGRAMS >/dev/null 2>&1 || NAME_ONLY_PROGRAMS=(nvim vim vi view gvim git lazygit gitui lazydocker
   claude codex aider pi gemini cursor cursor-agent devin agy antigravity cline omp mastracode opencode
-  copilot kimi kiro kiro-cli droid amp grok hermes kilo qodercli qwen maki)
+  copilot kimi kiro kiro-cli droid amp grok hermes kilo qodercli qwen maki muse muse-cli muse-code)
 
 # Quick tools that should not take over the tab name: while one runs the tab
 # keeps showing the shell (SHELL_NAME) so it does not flicker.
@@ -178,6 +180,16 @@ declare -p SUBSTITUTE_SETS >/dev/null 2>&1 || SUBSTITUTE_SETS=(
   's|.*ipython([32])|ipython\1|'
   's|.*poetry shell.*|poetry|'
 )
+
+# The same, for the directory-derived label a WORKSPACE carries. Empty by
+# default: a workspace shows the name of the directory it sits in, and a rule
+# here is somebody asking for a shorter spelling of it.
+#
+# Not a naming knob, despite the company it keeps -- it applies whether or not
+# tabs are named. It lives in this file because it is string-in / string-out
+# like everything else here, and because config.sh has to get first refusal on
+# the default (see the `declare -p` note at the top).
+declare -p WORKSPACE_SUBSTITUTE_SETS >/dev/null 2>&1 || WORKSPACE_SUBSTITUTE_SETS=()
 
 # Titles that name the agent instead of the work it is doing. An agent sets one
 # of these before it has a task (at startup, or once a session is cleared), and a
@@ -294,6 +306,10 @@ declare -p TITLE_FILLER_WORDS >/dev/null 2>&1 || TITLE_FILLER_WORDS=(a an the to
 # program is shown as <label> regardless of its category (e.g. "clx=hn" makes a
 # clx tab read "hn"). Takes priority over every rule except the bare-prompt shell
 # name. Set this in config.sh, e.g. PROGRAM_ALIASES=("clx=hn" "lazygit=lg").
+#
+# An agent known by two names (cursor-agent, kind "cursor") answers to either of
+# them, since which one reaches naming says only how it was installed. See
+# ar_other_spelling.
 declare -p PROGRAM_ALIASES >/dev/null 2>&1 || PROGRAM_ALIASES=()
 
 # ---- helpers ----
@@ -306,13 +322,57 @@ ar_in_list() {
   return 1
 }
 
+# ar_other_spelling <name> -> the same agent's other spelling, or empty.
+#
+# Two agents are known by two names: the executable (cursor-agent, kiro-cli) and
+# herdr's --kind id (cursor, kiro). Which of the two reaches naming is an
+# installation detail -- a natively installed agent arrives as its executable,
+# an npm-fronted one as the kind the WRAPPER_PROGRAMS unwrap substitutes -- so a
+# lookup keyed by name has to answer for both. NAME_ONLY_PROGRAMS already lists
+# both spellings of every such agent, so the pair is read off that list rather
+# than out of a second table that would have to be kept in step with it: strip
+# the suffix, or add it, and take the answer only when the list carries it too.
+#
+# BOTH spellings have to be listed, which is what makes them one agent under two
+# names. The suffix alone is not a pairing: git is on the list, so a name derived
+# by stripping "-cli" would hand an unrelated git-cli whatever alias git carries.
+ar_other_spelling() {
+  local n=$1 alt suffix
+  ar_in_list "$n" "${NAME_ONLY_PROGRAMS[@]}" || return 0
+  for suffix in -agent -cli; do
+    case "$n" in
+    *"$suffix") alt=${n%"$suffix"} ;;
+    *) alt="$n$suffix" ;;
+    esac
+    if ar_in_list "$alt" "${NAME_ONLY_PROGRAMS[@]}"; then
+      printf '%s' "$alt"
+      return 0
+    fi
+  done
+}
+
 # ar_alias <program> -> its PROGRAM_ALIASES label, or empty when unaliased.
+#
+# An agent is matched under either of its spellings (see ar_other_spelling), so
+# one entry covers it however it was installed. The exact name is tried first,
+# so a config naming both spellings separately still gets each one.
 ar_alias() {
-  local n=$1 pair
+  local n=$1 pair alt=""
   [ -n "$n" ] || return 0
+  [ ${#PROGRAM_ALIASES[@]} -gt 0 ] || return 0
   for pair in "${PROGRAM_ALIASES[@]}"; do
     case "$pair" in
     "$n="*)
+      printf '%s' "${pair#*=}"
+      return 0
+      ;;
+    esac
+  done
+  alt=$(ar_other_spelling "$n")
+  [ -n "$alt" ] || return 0
+  for pair in "${PROGRAM_ALIASES[@]}"; do
+    case "$pair" in
+    "$alt="*)
       printf '%s' "${pair#*=}"
       return 0
       ;;
@@ -324,6 +384,16 @@ ar_alias() {
 ar_subst() {
   local s=$1 expr
   for expr in "${SUBSTITUTE_SETS[@]}"; do
+    s=$(printf '%s' "$s" | sed -E "$expr")
+  done
+  printf '%s' "$s"
+}
+
+# ar_ws_subst <string> -> string with WORKSPACE_SUBSTITUTE_SETS applied in order.
+# The empty rule list is the common case and forks nothing.
+ar_ws_subst() {
+  local s=$1 expr
+  for expr in "${WORKSPACE_SUBSTITUTE_SETS[@]}"; do
     s=$(printf '%s' "$s" | sed -E "$expr")
   done
   printf '%s' "$s"
@@ -470,6 +540,72 @@ ar_model_label() {
   [ -n "$out" ] || return 1
   AR_MODEL_LABEL=$out
   printf '%s' "$out"
+}
+
+# ar_icon_reserve <program> -> the text ar_format prepends for this program's
+# icon, or "". The literal text rather than an allowance for it: ICON_MAP takes
+# any string, so a flat two is right for one glyph and wrong for everything
+# else, and a caller pricing a budget needs what will actually be spent.
+#
+# ICON_STYLE=icon draws the glyph INSTEAD of the label, so nothing a title
+# caller decides reaches the tab and there is nothing to reserve; "name" draws
+# no glyph at all. Only the default pays.
+ar_icon_reserve() {
+  [ "${ICONS_ENABLED:-0}" = "1" ] || return 0
+  case "${ICON_STYLE:-name_and_icon}" in
+  icon | name) return 0 ;;
+  esac
+  local ic
+  ic=$(ar_icon "$1")
+  [ -n "$ic" ] && printf '%s ' "$ic"
+}
+
+# ar_title_name_prefix <program> <budget> -> "<name>:", the prefix ar_format
+# puts in front of a task under TITLE_STYLE=name_and_task, or "" where it will
+# not. One answer, read by both the formatter that prepends it and the condenser
+# that has to price it, because two derivations of the same decision are free to
+# drift and only one of them would be under test.
+#
+# Here an alias IS wanted, which is the difference from the plain-title rule:
+# asking for the name is asking for the name you chose for it.
+#
+# The prefix is all or nothing. Truncation treats a label as prose, so a name
+# that does not leave room for a task would be kept INSTEAD of one: at a budget
+# of twelve "cursor-agent" filled the tab on its own. That renders name_and_task
+# as name only, which is the one thing it must not do, so the task keeps what it
+# needs and the name goes when it cannot be afforded -- this asks for the task
+# with the name added, not the other way about.
+#
+# A name carrying a space is refused whatever the budget. The word-boundary trim
+# cuts at the LAST space in the whole label, which for a multiword name is
+# inside the name: an alias of "SuperLongAgent Extra" rendered "SuperLongAgent"
+# alone, the task gone and the name itself clipped. A single-word name cannot be
+# reached that way, the colon joining it to the task with no space to cut at.
+#
+# An alias of nothing but spaces or control characters is scrubbed to nothing
+# and refused, rather than leaving a bare colon in front of the task.
+#
+# The glyph is charged here too, being prepended out of this same budget after
+# this decision. Over-reserving is the safe direction: it only ever refuses the
+# prefix and hands the task the room back.
+#
+# Asked of ar_fits, which answers in codepoints and answers without a process
+# wherever the value is ASCII.
+ar_title_name_prefix() {
+  [ "${TITLE_STYLE:-task}" = "name_and_task" ] && [ -n "$1" ] || return 0
+  local aliased pad
+  aliased=$(ar_alias "$1")
+  aliased=${aliased:-$1}
+  case $aliased in
+  *[[:cntrl:]]* | *" "*) aliased=$(printf '%s' "$aliased" | tr -s '[:cntrl:] ' ' ')
+                         aliased=${aliased# }; aliased=${aliased% } ;;
+  esac
+  case $aliased in
+  "" | *" "*) return 0 ;;
+  esac
+  printf -v pad '%*s' "${MIN_TASK_LEN:-7}" ""
+  ar_fits "$(ar_icon_reserve "$1")$aliased:$pad" "$2" || return 0
+  printf '%s:' "$aliased"
 }
 
 # ar_context_dir <pane directory> <workspace base label> -> the directory part of
@@ -809,7 +945,8 @@ ar_condense_title() {
     --arg case "${TITLE_CASE:-fold}" \
     --arg verbs "${TITLE_LEAD_VERBS[*]}" \
     --arg filler "${TITLE_FILLER_WORDS[*]}" '
-      ([$max - ($reserved | length), 0] | max) as $m
+      . as $orig
+    | ([$max - ($reserved | length), 0] | max) as $m
     | ($verbs  | ascii_downcase | split(" ")) as $verb
     | ($filler | ascii_downcase | split(" ")) as $fill
     # The filler list as WRITTEN, alongside the folded one, and the identifier
@@ -864,6 +1001,30 @@ ar_condense_title() {
         elif ((.out | length) + ($sep | length) + ($w | length)) <= $m then {out: (.out + $sep + $w), done: false}
         else {out: .out, done: true} end)
     | .out
+    # Two ways a candidate is worse than the sentence it would replace, and both
+    # hand the sentence back rather than shipping the label.
+    #
+    # A label LONGER than the title has inverted the whole point: a separator of
+    # more than one character can spend more budget than the prose it replaced,
+    # and then ar_format cuts a label that would have fitted. Equal length is
+    # fine and is on purpose -- that is the casing folded and the words fused
+    # into the one token every other tab name is -- so only growth is refused.
+    #
+    # A leading "[<digits>]" is the shape ar_index_prefix writes and
+    # ar_strip_prefix reads back. A label wearing it is read at the next
+    # reconcile as a base somebody typed by hand, and the tab opts out of
+    # naming until a reset. Only a separator carrying whitespace reaches this --
+    # the default "-" cannot -- but the cost when it does is the tab, not the
+    # label.
+    #
+    # Whitespace OR a control character, because the shape is judged on what
+    # ar_format will STORE rather than on what is written here: its scrub turns
+    # any run of either into one space, so a separator of a tab produced
+    # "[12]\tparser" here, passed a check looking for a literal space, and
+    # reached the tab as "[12] parser" -- the shape, arriving one step later.
+    | if . != "" and (length <= ($orig | length))
+         and ((test("^\\[[0-9]+\\]([[:space:][:cntrl:]]|$)")) | not)
+      then . else "" end
   ' 2>/dev/null
 }
 # ---- helpers ----
@@ -1058,9 +1219,17 @@ ar_label() {
 #   program == "" means a bare prompt (name by the shell).
 ar_format() {
   local prog=$1 cmdline=$2 title=${3:-} name="" ic aliased="" is_shell=0 max=${MAX_NAME_LEN:-20}
-  local AR_TITLE_MIN_TASK
-  printf -v AR_TITLE_MIN_TASK '%*s' "${MIN_TASK_LEN:-7}" ""
   AR_ACTIVITY=""
+  # Muse ships as muse-bin-<version> (muse-bin-0.1.0-R708.1) and never runs under
+  # a bare name, so no exact-match list can carry the process a pane actually
+  # shows. herdr folds those onto its "muse" kind (is_muse_versioned_binary,
+  # src/detect/mod.rs), asking for a digit right after the prefix so an unrelated
+  # muse-binary stays unmatched, and this mirrors that rule. Folding here rather
+  # than in each list puts it ahead of all three things that key on the name --
+  # the alias lookup below, the program lists, and the icon map -- so a versioned
+  # install is named, aliased and glyphed the way a named one is. Inline because
+  # every reconcile and every shell prompt runs this function.
+  case "$prog" in muse-bin-[0-9]*) prog=muse ;; esac
   # Only the program-name chain below consults an alias, so a title (or a bare
   # prompt) does not pay for the lookup.
   [ -n "$prog" ] && [ -z "$title" ] && aliased=$(ar_alias "$prog")
@@ -1083,34 +1252,12 @@ ar_format() {
     #
     # It also means the alias is looked up by agent KIND here, where a tab named
     # by program looks it up by program name. Those differ for two agents,
-    # cursor-agent (kind cursor) and kiro-cli (kind kiro). That split is already
-    # in the released code: WRAPPER_PROGRAMS substitutes the kind for the program
-    # before this same lookup, so a node-fronted cursor-agent already aliases by
-    # "cursor" while a natively installed one aliases by "cursor-agent".
-    if [ "${TITLE_STYLE:-task}" = "name_and_task" ] && [ -n "$prog" ]; then
-      aliased=$(ar_alias "$prog")
-      aliased=${aliased:-$prog}
-      # Scrub the name the way the label is scrubbed further down, and before
-      # deciding there is one: an alias of nothing but spaces or control
-      # characters would otherwise leave a bare colon in front of the task.
-      case $aliased in
-      *[[:cntrl:]]* | *" "*) aliased=$(printf '%s' "$aliased" | tr -s '[:cntrl:] ' ' ')
-                             aliased=${aliased# }; aliased=${aliased% } ;;
-      esac
-      # The prefix is all or nothing. Truncation treats a label as prose, so a
-      # name that does not leave room for a task gets kept INSTEAD of one: at a
-      # budget of twelve "cursor-agent" filled the tab on its own, and a name
-      # with a space in it was cut in half at the space. Both render name_and_task
-      # as name only, which is the one thing it must not do. So the task keeps
-      # what it needs and the name goes when it cannot be afforded -- this asks
-      # for the task with the name added, not the other way about.
-      #
-      # Asked of ar_fits, which answers in codepoints and answers without a
-      # process wherever the value is ASCII.
-      local probe="$aliased:$AR_TITLE_MIN_TASK"
-      if [ -n "$aliased" ] && ar_fits "$probe" "$max"; then
-        name="$aliased:$name"
-      fi
+    # cursor-agent (kind cursor) and kiro-cli (kind kiro), and ar_alias answers
+    # to either spelling for exactly that reason, so one entry covers the agent
+    # whichever name reaches it (issue #19).
+    if [ "${TITLE_STYLE:-task}" = "name_and_task" ]; then
+      aliased=$(ar_title_name_prefix "$prog" "$max")
+      [ -n "$aliased" ] && name="$aliased$name"
     fi
   elif [ -z "$prog" ]; then
     name=$SHELL_NAME
@@ -1128,7 +1275,7 @@ ar_format() {
     is_shell=1 # quick tools: keep showing the shell
   elif ar_in_list "$prog" "${NAME_ONLY_PROGRAMS[@]}"; then
     name="$(ar_subst "$prog")" # nvim, claude, ...: just the name
-  elif [ "${SHOW_PROGRAM_ARGS:-1}" = "1" ] && [ -n "$cmdline" ]; then
+  elif [ "${SHOW_PROGRAM_ARGS:-0}" = "1" ] && [ -n "$cmdline" ]; then
     name="$(ar_subst "$cmdline")"
   else
     name="$(ar_subst "$prog")"

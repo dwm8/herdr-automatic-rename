@@ -27,6 +27,14 @@ serve() { cat "$dir/$1" 2>/dev/null || printf '%s' "$2"; }
 group="$1"; shift 2>/dev/null || true
 action="$1"; shift 2>/dev/null || true
 
+# $HERDR_MOCK_FAIL_VERB="tab list" (or any "<group> <action>") makes that one
+# query exit 1 with no output, standing in for a socket blip mid-pass. Naming
+# the arguments too ("tab list --workspace w2") fails only that call, which is
+# how a pass reads one workspace and loses the other.
+case "$group $action $*" in
+  "${HERDR_MOCK_FAIL_VERB:-}"|"${HERDR_MOCK_FAIL_VERB:-} "*) [ -n "${HERDR_MOCK_FAIL_VERB:-}" ] && exit 1 ;;
+esac
+
 case "$group" in
   # $HERDR_MOCK_VERSION picks the herdr the engine thinks it is talking to, which
   # gates agent numbering (herdr >= 0.7.5 rejects a bracketed agent name). The
@@ -52,7 +60,16 @@ case "$group" in
         w=""
         while [ $# -gt 0 ]; do case "$1" in --workspace) w="$2"; shift 2 ;; *) shift ;; esac; done
         serve "tabs_$w.json" '{"result":{"tabs":[]}}' ;;
-      get)    serve "tab_$1.json" '{}' ;;
+      # $HERDR_MOCK_TAB_GONE_AFTER=N: the first N `tab get` calls serve the
+      # fixture, every later one answers {} (the tab has left herdr's model). A
+      # counter file beside the log remembers across processes, and doubles as
+      # the record of how many polls the engine's close wait made.
+      get)
+        if [ -n "${HERDR_MOCK_TAB_GONE_AFTER:-}" ]; then
+          n=$(cat "$log.tabget" 2>/dev/null || echo 0); n=$(( n + 1 )); printf '%s' "$n" >"$log.tabget"
+          [ "$n" -gt "$HERDR_MOCK_TAB_GONE_AFTER" ] && { printf '{}'; exit 0; }
+        fi
+        serve "tab_$1.json" '{}' ;;
       # $HERDR_MOCK_FAIL_RENAME=1 stands in for a herdr that REJECTS the rename
       # (an invalid label, a socket blip): the attempt is still logged, so a test
       # can assert it was issued, and the command then fails so the engine sees a

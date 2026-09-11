@@ -38,6 +38,26 @@
 # Anything else in brackets ("[wip] foo") is left alone, digits are the only
 # trigger.
 
+# Ordered `sed -E` rewrites for the name a workspace takes from its directory.
+# They change the label herdr shows and nothing else: the directory keeps its
+# name, the Git worktree keeps its name, and a tab in that directory goes on
+# deduping against the directory's own name rather than the rewrite. Empty by
+# default. For example, shorten "worktree-feature" to "wt-feature":
+# WORKSPACE_SUBSTITUTE_SETS=(
+#   's|^worktree-|wt-|'
+# )
+#
+# Only a name this plugin derived is rewritten. Type a workspace name yourself
+# and it is left alone for good, the way the tab opt-out works -- except that
+# herdr offers no way to tell a hand-typed name from the derivation it happens
+# to match exactly, so a name you type that IS the directory name reads as ours.
+#
+# The rewrite is derived fresh on every pass rather than built out of the label
+# the last one wrote, so deleting the rules puts the derived names back at the
+# next herdr event. With workspace numbering off there is no next pass to do it,
+# and the labels keep their last rewrite until the `clear` action, which is what
+# that action is for.
+
 # ---- naming knobs (only used when NAME_TABS=1) ----
 
 # 1 = put the CONTEXT in front of the program: the directory the pane sits in,
@@ -149,11 +169,22 @@
 # what the task may spend rather than making the tab wider -- though a label that
 # was under the budget does get longer: "auth flow" becomes "cc:auth flow".
 #
+# Where TITLE_CONDENSE is also on, the name is reserved before the keywords are
+# chosen, so condensing knows the prefix is coming and keeps whole words either
+# way.
+#
 # The prefix is all or nothing. Where the budget cannot seat the name, its colon
 # and MIN_TASK_LEN characters of task, the NAME goes: this asks for the task with
 # the name added, not the other way about, and a tab reading only "cursor-agent"
-# would be the one thing it must not do. A refused title is not prefixed either --
-# the tab falls back to the program name, and "cc:cc" says nothing twice.
+# would be the one thing it must not do. The glyph and its space are part of that
+# budget where icons are on, so an iconned tab seats a shorter name than a plain
+# one. A refused title is not prefixed either -- the tab falls back to the program
+# name, and "cc:cc" says nothing twice.
+#
+# A PROGRAM_ALIASES value carrying a space is never used as a prefix, whatever
+# the budget: truncation cuts at the last space in the label, which for such a
+# name is inside the name, and the tab was left reading a fragment of it with no
+# task at all.
 # TITLE_STYLE=task
 
 # The least task worth printing beside a name, used by the rule above.
@@ -217,9 +248,11 @@
 #
 # It selects rather than generates: the words are the agent's own, in the order it
 # wrote them, on the reasoning that it put the salient ones first. A title it
-# cannot shorten to anything (all filler) is left as the sentence. The one
-# exception is a first word longer than the whole budget, which is cut rather than
-# dropped, since dropping it would leave no label at all.
+# cannot shorten to anything (all filler) is left as the sentence, and so is one
+# whose label would come out LONGER than the prose or wearing a leading "[12]",
+# the shape a tab number has. The one exception is a first word longer than the
+# whole budget, which is cut rather than dropped, since dropping it would leave
+# no label at all.
 #
 # Off by default, so a config that does not name it gets exactly what
 # AGENT_TITLES has always rendered.
@@ -252,7 +285,17 @@
 
 # What joins the surviving words. The default fuses the label into one token, the
 # shape every other tab name has; " " reads as the phrase instead. Its length is
-# charged to MAX_TITLE_LEN like any other character.
+# charged to MAX_TITLE_LEN like any other character, and a separator long enough
+# to make the label outgrow the sentence gets the sentence instead.
+#
+# TITLE_STYLE=name_and_task is charged to that budget as well, so the two knobs
+# together spend it on fewer keywords rather than cutting the last one: a tab
+# reads "<glyph> claude:nightly-ETL-job" where the task alone would have carried
+# "nightly-ETL-job-drops-rows".
+#
+# A separator of whitespace or a control character is squeezed to one space
+# before the label is stored, so a title that would then read as a tab number
+# ("Fix [12] parser") is left as the sentence rather than condensed.
 # TITLE_WORD_SEPARATOR=-
 
 # Casing. "fold" downcases every word except an all-caps-and-digits identifier: a
@@ -314,12 +357,20 @@
 
 # Rename specific programs on the tab. "<program>=<label>" pairs; wins over every
 # rule except the bare-prompt shell name.
+#
+# The agents whose executable differs from herdr's own id for them, cursor-agent
+# (id "cursor"), kiro-cli (id "kiro"), and muse-cli / muse-code (id "muse"),
+# answer to either spelling, so one entry names such an agent however it was
+# installed. Muse's versioned binary (muse-bin-0.1.0-R708.1) is named "muse"
+# before any of this, so it takes a "muse=" entry too.
 # PROGRAM_ALIASES=(
 #   "lazygit=lg"
 #   "clx=hn"
 # )
 
-# Ordered `sed -E` rewrites applied to the final label.
+# Ordered `sed -E` rewrites applied to the program name or command line a tab
+# shows. They do not reach the directory, the branch, an agent's title, or a
+# workspace label.
 # SUBSTITUTE_SETS=(
 #   's|.*ipython([32])|ipython\1|'
 #   's|.*poetry shell.*|poetry|'

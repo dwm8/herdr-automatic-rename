@@ -9,3 +9,6 @@ tests/tmp/
 
 # Scratch: review notes and other working files.
 tmp/
+
+# Advisor plans: local working notes, never committed.
+plans/

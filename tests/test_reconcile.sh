@@ -27,7 +27,7 @@ PI_SPINNER=$(printf '\342\240\213') # U+280B, one of its ten working frames
 setup() {
   SB=$(mktemp -d "${TMPDIR:-/tmp}/hal-test.XXXXXX")
   export HERDR_MOCK_DIR="$SB/fixtures"; mkdir -p "$HERDR_MOCK_DIR"
-  export HERDR_MOCK_LOG="$SB/renames.log"; : >"$HERDR_MOCK_LOG"
+  export HERDR_MOCK_LOG="$SB/renames.log"; : >"$HERDR_MOCK_LOG"; rm -f "$HERDR_MOCK_LOG.tabget"
   export HERDR_BIN_PATH="$MOCK"
   export XDG_STATE_HOME="$SB/state"
   export HERDR_AUTOMATIC_RENAME_CONFIG="$SB/none.sh"   # absent -> env toggles win
@@ -37,6 +37,8 @@ setup() {
   export SHELL_NAME=zsh
   unset HERDR_MOCK_VERSION HERDR_MOCK_NO_VERSION HERDR_MOCK_RERUN_ONCE   # per-scenario opt-in; mock default is current herdr
   unset HERDR_MOCK_FAIL_RENAME                     # per-scenario opt-in; renames succeed by default
+  unset HERDR_MOCK_FAIL_VERB                       # per-scenario opt-in; every query answers by default
+  unset HERDR_MOCK_TAB_GONE_AFTER                  # per-scenario opt-in; a tab stays until its fixture goes
   unset HIDE_SHELL                                 # per-scenario opt-in; default is off
   unset AUTO_INDEX_WORKSPACES AUTO_INDEX_TABS AUTO_INDEX_AGENTS   # per-kind opt-in; inherit AUTO_INDEX
   unset AGENT_TITLES SHOW_PROGRAM_ARGS TITLE_STYLE # per-scenario opt-in; naming.sh defaults apply
@@ -1972,6 +1974,426 @@ check_absent "an ordinary event renames nothing" "$(log)" "tab rename"
 check "the opt-out is recorded, not lost" " false" \
   "$(jq -r '."w1:t1" | "\(.auto) \(.enabled)"' "$STATE" 2>/dev/null)"
 check "and the file parses again"          "object" "$(jq -r 'type' "$STATE" 2>/dev/null)"
+teardown
+
+# ======================================================================
+# Scenario 43: one PROGRAM_ALIASES entry covers an agent under both spellings.
+#   cursor-agent is known to herdr as kind "cursor", and which of the two names
+#   reaches naming is an installation detail: a natively installed one arrives as
+#   its executable, an npm-fronted one as the kind the WRAPPER_PROGRAMS unwrap
+#   substitutes. Keyed exactly, the same config labelled the two panes
+#   differently (issue #19). The alias comes from a real config file, arrays not
+#   being able to travel through the environment.
+#   t1: cursor-agent behind node, detected by herdr as "cursor".
+#   t2: cursor-agent run natively.
+# ======================================================================
+setup
+export NAME_TABS=1 AUTO_INDEX=0
+printf 'PROGRAM_ALIASES=("cursor-agent=cx")\n' >"$HERDR_AUTOMATIC_RENAME_CONFIG"
+fixture workspaces.json <<'JSON'
+{"result":{"workspaces":[{"workspace_id":"w1","label":"api"}]}}
+JSON
+fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[
+  {"tab_id":"w1:t1","label":"1","pane_count":1,"focused":true},
+  {"tab_id":"w1:t2","label":"2","pane_count":1,"focused":false}
+]}}
+JSON
+fixture panes.json <<'JSON'
+{"result":{"panes":[
+  {"pane_id":"p1","tab_id":"w1:t1","focused":true,"agent":"cursor","agent_status":"idle"},
+  {"pane_id":"p2","tab_id":"w1:t2","focused":false,"agent":"cursor","agent_status":"idle"}
+]}}
+JSON
+fixture procinfo_p1.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":100,
+  "foreground_processes":[{"pid":100,"argv":["node","/home/u/.npm/_npx/x/node_modules/.bin/cursor-agent"],
+  "name":"MainThread","cmdline":"node /home/u/.npm/_npx/x/node_modules/.bin/cursor-agent"}]}}}
+JSON
+fixture procinfo_p2.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":200,
+  "foreground_processes":[{"pid":200,"argv0":"cursor-agent","cmdline":"cursor-agent"}]}}}
+JSON
+run_event tab.focused
+out=$(log)
+check_contains "the kind takes the alias too" "$out" "tab rename w1:t1 cx"
+check_contains "and so does the executable"   "$out" "tab rename w1:t2 cx"
+check_absent   "neither spelling reaches a tab" "$out" "cursor"
+teardown
+
+# ======================================================================
+# Scenario 44: a workspace whose tab list could not be read keeps its records.
+#   Per-list path (no snapshot.json), two workspaces, every tab owned, plus one
+#   record for a tab that is gone. The pass reads w1 and fails on w2's `tab
+#   list`. It used to prune on what it saw, which was w1 alone, and every w2
+#   record went with it: each of those tabs then read as renamed by hand on the
+#   next pass and opted out for good. A pass that could not read every
+#   workspace prunes nothing, the gone tab's record included, while the
+#   workspace it did read is still named. The next full read prunes what is
+#   really gone and keeps the rest.
+# ======================================================================
+setup
+export NAME_TABS=1 AUTO_INDEX=0
+STATE="$XDG_STATE_HOME/herdr-automatic-rename/state.json"
+mkdir -p "$XDG_STATE_HOME/herdr-automatic-rename"
+printf '%s\n' '{"w1:t1":{"auto":"nvim","enabled":true},
+  "w2:t1":{"auto":"vim","enabled":true},"w2:t2":{"auto":"lazygit","enabled":true},
+  "w2:t9":{"auto":"htop","enabled":true}}' >"$STATE"
+fixture workspaces.json <<'JSON'
+{"result":{"workspaces":[
+  {"workspace_id":"w1","label":"api"},
+  {"workspace_id":"w2","label":"web"}
+]}}
+JSON
+fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[{"tab_id":"w1:t1","label":"nvim","pane_count":1,"focused":true}]}}
+JSON
+fixture tabs_w2.json <<'JSON'
+{"result":{"tabs":[
+  {"tab_id":"w2:t1","label":"vim","pane_count":1,"focused":true},
+  {"tab_id":"w2:t2","label":"lazygit","pane_count":1,"focused":false}
+]}}
+JSON
+fixture panes.json <<'JSON'
+{"result":{"panes":[
+  {"pane_id":"p1","tab_id":"w1:t1","focused":true},
+  {"pane_id":"p2","tab_id":"w2:t1","focused":true},
+  {"pane_id":"p3","tab_id":"w2:t2","focused":true}
+]}}
+JSON
+fixture procinfo_p1.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":100,
+  "foreground_processes":[{"pid":100,"argv0":"lazygit","cmdline":"lazygit"}]}}}
+JSON
+fixture procinfo_p2.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":200,
+  "foreground_processes":[{"pid":200,"argv0":"vim","cmdline":"vim"}]}}}
+JSON
+fixture procinfo_p3.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":300,
+  "foreground_processes":[{"pid":300,"argv0":"lazygit","cmdline":"lazygit"}]}}}
+JSON
+export HERDR_MOCK_FAIL_VERB="tab list --workspace w2"
+run_event tab.focused
+check_contains "the workspace that was read is still named" "$(log)" "tab rename w1:t1 lazygit"
+check "the unread workspace keeps every record" "true true true" \
+  "$(jq -r '[."w2:t1", ."w2:t2", ."w2:t9"] | map(.enabled | tostring) | join(" ")' "$STATE" 2>/dev/null)"
+unset HERDR_MOCK_FAIL_VERB
+: >"$HERDR_MOCK_LOG"
+# herdr now reports the label the pass just wrote (see scenario 41).
+fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[{"tab_id":"w1:t1","label":"lazygit","pane_count":1,"focused":true}]}}
+JSON
+run_event tab.focused
+check "a full read prunes the tab that is gone" "null" \
+  "$(jq -r '."w2:t9"' "$STATE" 2>/dev/null)"
+check "and keeps the ones that are not" "true true true" \
+  "$(jq -r '[."w1:t1", ."w2:t1", ."w2:t2"] | map(.enabled | tostring) | join(" ")' "$STATE" 2>/dev/null)"
+check "with nothing to rename" "" "$(log)"
+teardown
+
+# ======================================================================
+# Scenario 45: tab.closed waits for the closing tab to leave herdr's model, then
+#   renumbers the survivors against the settled list. herdr fires the event while
+#   the tab is still listed, so a reconcile that ran at once would have found
+#   every number correct and left the tab after the gap reading "[3]" for good.
+#   The mock serves t2 to the first two `tab get` polls and reports it gone on
+#   the third, so the counter file pins that the wait ended on the first poll
+#   that said gone (HERDR_MOCK_TAB_GONE_AFTER + 1) rather than on a timeout. The
+#   tab list is the settled one, without t2. No panes fixture: nothing here can
+#   be named, so the renames are the renumbering alone.
+# ===============================================================teardown
+
+# ======================================================================
+setup
+export NAME_TABS=1 AUTO_INDEX=1
+export HERDR_TAB_ID=w1:t2 HERDR_MOCK_TAB_GONE_AFTER=2
+STATE="$XDG_STATE_HOME/herdr-automatic-rename/state.json"
+mkdir -p "$XDG_STATE_HOME/herdr-automatic-rename"
+printf '%s\n' '{"w1:t1":{"auto":"a","enabled":true},"w1:t2":{"auto":"b","enabled":true},
+  "w1:t3":{"auto":"c","enabled":true}}' >"$STATE"
+fixture workspaces.json <<'JSON'
+{"result":{"workspaces":[{"workspace_id":"w1","label":"[1] api"}]}}
+JSON
+fixture tab_w1:t2.json <<'JSON'
+{"result":{"tab":{"tab_id":"w1:t2","label":"[2] b"}}}
+JSON
+fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[
+  {"tab_id":"w1:t1","label":"[1] a","pane_count":1,"focused":true},
+  {"tab_id":"w1:t3","label":"[3] c","pane_count":1,"focused":false}
+]}}
+JSON
+run_event tab.closed
+out=$(log)
+check_contains "the survivor after the gap moves up"  "$out" "tab rename w1:t3 [2] c"
+check_absent   "the survivor before it is left alone" "$out" "tab rename w1:t1"
+check "the wait ended on the first poll that reported the tab gone" \
+  "$(( HERDR_MOCK_TAB_GONE_AFTER + 1 ))" "$(cat "$HERDR_MOCK_LOG.tabget")"
+check "the closed tab's record is pruned" "false" "$(jq 'has("w1:t2")' "$STATE")"
+teardown
+
+# ======================================================================
+# Scenario 46: a "priority"-sorted agent panel strips the numbers off, on a
+#   herdr that would otherwise accept them. cmd+alt+N follows the panel's
+#   visible order, and in priority mode that order is the attention queue, which
+#   the CLI never exposes, so a fixed "[N]" can only be wrong. The status event
+#   is the one herdr fires as the queue reorders, and the revert is the same
+#   --clear that hands the agent back to detection (scenarios 3 and 16). Agents
+#   are the only kind read here, so the tab and pane lists stay empty.
+# ======================================================================
+setup
+export NAME_TABS=1 AUTO_INDEX=1
+export HERDR_MOCK_VERSION=0.7.4   # < 0.7.5: numbering would be allowed
+printf 'agent_panel_sort = "priority"\n' >"$HERDR_CONFIG_FILE"
+fixture workspaces.json <<'JSON'
+{"result":{"workspaces":[{"workspace_id":"w1","label":"[1] api"}]}}
+JSON
+fixture agents.json <<'JSON'
+{"result":{"agents":[
+  {"terminal_id":"term_a","pane_id":"w1:pA","name":"[1] claude","agent_session":{"agent":"claude"}},
+  {"terminal_id":"term_b","pane_id":"w1:pB","name":"[2] codex","agent_session":{"agent":"codex"}}
+]}}
+JSON
+run_event pane.agent_status_changed
+out=$(log)
+check_contains "priority sort: first agent reverted"  "$out" "agent rename w1:pA --clear"
+check_contains "priority sort: second agent reverted" "$out" "agent rename w1:pB --clear"
+check_absent   "priority sort: nothing renumbered"    "$out" "agent rename w1:pA ["
+check_absent   "priority sort: nothing renumbered (2)" "$out" "agent rename w1:pB ["
+teardown
+
+# ======================================================================
+# ar_agent_sort's TOML parse, called directly. The engine is sourced in a child
+# bash, where BASH_SOURCE and $0 differ and its entry point stays quiet, and the
+# sandbox's HERDR_CONFIG_FILE is the only config it can find (the client
+# preference file that outranks it does not exist here). The first case is the
+# bug this pins: a substring match read the comment as the value, so a user who
+# annotated the line with the other choice got the other choice.
+# ======================================================================
+sort_of() {
+  printf '%s\n' "$1" >"$HERDR_CONFIG_FILE"
+  bash -c '. "$1"; ar_agent_sort' _ "$ENGINE"
+}
+setup
+check "parse: a trailing comment is not the value" "spaces" \
+  "$(sort_of 'agent_panel_sort = "spaces"  # or "priority"')"
+check "parse: priority reads as priority" "priority" "$(sort_of 'agent_panel_sort = "priority"')"
+check "parse: no such line defaults to spaces" "spaces" "$(sort_of '')"
+teardown
+
+# ======================================================================
+# Scenario 47: the plugin's own rename does not buy a second full pass.
+#   Every rename the pass issues re-fires tab.renamed, and that event used to
+#   run the whole reconcile again to find every number already right. When
+#   state says we own the tab at exactly the label it carries, the event exits
+#   before the lock. The pane here runs vim while the record says nvim, so a
+#   full pass would visibly rename the tab and the skipped one visibly does not.
+#   A label typed by hand, or an event with no tab id, still gets the full pass.
+# ======================================================================
+setup
+export NAME_TABS=1 AUTO_INDEX=1
+STATE="$XDG_STATE_HOME/herdr-automatic-rename/state.json"
+mkdir -p "$XDG_STATE_HOME/herdr-automatic-rename"
+printf '{"w1:t1":{"auto":"nvim","enabled":true,"ws":"api"}}\n' >"$STATE"
+fixture workspaces.json <<'JSON'
+{"result":{"workspaces":[{"workspace_id":"w1","label":"[1] api"}]}}
+JSON
+fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[{"tab_id":"w1:t1","label":"[1] nvim","pane_count":1,"focused":true}]}}
+JSON
+fixture tab_w1:t1.json <<'JSON'
+{"result":{"tab":{"tab_id":"w1:t1","label":"[1] nvim","pane_count":1,"focused":true}}}
+JSON
+fixture panes.json <<'JSON'
+{"result":{"panes":[{"pane_id":"p1","tab_id":"w1:t1","focused":true}]}}
+JSON
+fixture procinfo_p1.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":100,
+  "foreground_processes":[{"pid":100,"argv0":"vim","cmdline":"vim"}]}}}
+JSON
+export HERDR_TAB_ID=w1:t1
+run_event tab.renamed
+check "our own rename runs no pass"          "" "$(log)"
+check "and touches no state"                 "nvim true" \
+  "$(jq -r '."w1:t1" | "\(.auto) \(.enabled)"' "$STATE" 2>/dev/null)"
+# The same event with no tab id has nothing to check and runs the pass.
+unset HERDR_TAB_ID
+run_event tab.renamed
+check_contains "without a tab id the pass runs" "$(log)" "tab rename w1:t1 [1] vim"
+: >"$HERDR_MOCK_LOG"
+printf '{"w1:t1":{"auto":"nvim","enabled":true,"ws":"api"}}\n' >"$STATE"
+export HERDR_TAB_ID=w1:t1
+# A label typed by hand is not ours, so the full pass runs and opts the tab out.
+fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[{"tab_id":"w1:t1","label":"[1] typed-by-hand","pane_count":1,"focused":true}]}}
+JSON
+fixture tab_w1:t1.json <<'JSON'
+{"result":{"tab":{"tab_id":"w1:t1","label":"[1] typed-by-hand","pane_count":1,"focused":true}}}
+JSON
+run_event tab.renamed
+check "a hand rename opts the tab out"       "false" "$(jq -r '."w1:t1".enabled' "$STATE" 2>/dev/null)"
+check_absent "and is left alone"             "$(log)" "tab rename w1:t1"
+# A seeded record is a guess, not ownership: the pass confirms it, then owns it.
+: >"$HERDR_MOCK_LOG"
+printf '{"w1:t1":{"auto":"nvim","enabled":true,"seeded":true}}\n' >"$STATE"
+fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[{"tab_id":"w1:t1","label":"[1] nvim","pane_count":1,"focused":true}]}}
+JSON
+fixture tab_w1:t1.json <<'JSON'
+{"result":{"tab":{"tab_id":"w1:t1","label":"[1] nvim","pane_count":1,"focused":true}}}
+JSON
+run_event tab.renamed
+check_contains "a seeded record still gets the pass" "$(log)" "tab rename w1:t1 [1] vim"
+unset HERDR_TAB_ID
+teardown
+
+# ======================================================================
+# Scenario 48: the doctor action explains an owned tab. It runs one real pass
+#   with tracing forced on and reports what THAT pass decided, so the record,
+#   the label, and at least one trace line about the tab all appear on stdout,
+#   and the first sections go out as a single notification for a keybinding
+#   with no terminal. The trace file it made is its own and is gone afterwards.
+#   A user's AR_TRACE stays off throughout: the action forces its own.
+# ======================================================================
+setup
+export NAME_TABS=1 AUTO_INDEX=0
+SD="$XDG_STATE_HOME/herdr-automatic-rename"; mkdir -p "$SD"
+printf '{"w1:t1":{"auto":"nvim","enabled":true,"ws":"api"}}\n' >"$SD/state.json"
+fixture workspaces.json <<'JSON'
+{"result":{"workspaces":[{"workspace_id":"w1","label":"api"}]}}
+JSON
+fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[{"tab_id":"w1:t1","label":"nvim","pane_count":1,"focused":true}]}}
+JSON
+fixture tab_w1:t1.json <<'JSON'
+{"result":{"tab":{"tab_id":"w1:t1","label":"nvim","pane_count":1,"focused":true}}}
+JSON
+fixture panes.json <<'JSON'
+{"result":{"panes":[{"pane_id":"p1","tab_id":"w1:t1","focused":true}]}}
+JSON
+fixture procinfo_p1.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":100,
+  "foreground_processes":[{"pid":100,"argv0":"nvim","cmdline":"nvim README.md"}]}}}
+JSON
+out=$(HERDR_TAB_ID=w1:t1 run_event doctor)
+check_rc       "doctor exits 0"                          0 $?
+check_contains "doctor names the tab"                    "$out" "tab: w1:t1"
+check_contains "doctor prints the record"                "$out" "enabled=true"
+check_contains "doctor prints the label"                 "$out" "label: [nvim]"
+check_contains "doctor shows a trace line about the tab" "$out" "w1:t1 owned unchanged"
+check_contains "doctor shows what the pass concluded"    "$out" "w1:t1 label already correct: [nvim]"
+check_contains "doctor prints the naming knobs"          "$out" "NAME_TABS=1 AUTO_INDEX=0"
+check "one notification"                                 "1" "$(log | grep -c '^notification show')"
+check_contains "the notification carries the record"     "$(log)" "enabled=true"
+check "the doctor's trace file is cleaned up"            "" "$(ls "$SD"/.doctor.* 2>/dev/null)"
+check "no trace.log is left either"                      "" "$(ls "$SD"/trace.log 2>/dev/null)"
+teardown
+
+# ======================================================================
+# Scenario 49: the doctor on a tab that opted out. This is the report issue
+#   diagnosis keeps needing: the record says enabled=false and the trace names
+#   the arm that left the label alone, so a user can tell "you renamed it by
+#   hand once" from "nothing is running".
+# ======================================================================
+setup
+export NAME_TABS=1 AUTO_INDEX=0
+SD="$XDG_STATE_HOME/herdr-automatic-rename"; mkdir -p "$SD"
+printf '{"w1:t1":{"auto":"","enabled":false}}\n' >"$SD/state.json"
+fixture workspaces.json <<'JSON'
+{"result":{"workspaces":[{"workspace_id":"w1","label":"api"}]}}
+JSON
+fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[{"tab_id":"w1:t1","label":"incident","pane_count":1,"focused":true}]}}
+JSON
+fixture tab_w1:t1.json <<'JSON'
+{"result":{"tab":{"tab_id":"w1:t1","label":"incident","pane_count":1,"focused":true}}}
+JSON
+fixture panes.json <<'JSON'
+{"result":{"panes":[{"pane_id":"p1","tab_id":"w1:t1","focused":true}]}}
+JSON
+out=$(HERDR_TAB_ID=w1:t1 run_event doctor)
+check_contains "doctor reports the opt-out record"  "$out" "enabled=false"
+check_contains "and the arm that honored it"        "$out" "w1:t1 opt-out stands"
+check_contains "and the label the user typed"       "$out" "label: [incident]"
+check_absent   "doctor renames nothing"             "$(log)" "tab rename"
+teardown
+
+# ======================================================================
+# Scenario 50: the doctor with no tab to explain. No tab id, no action context,
+#   and `tab list` (no --workspace) has no fixture, so the focused-tab fallback
+#   finds nothing. The notification says so, the exit status is still 0, and the
+#   whole pass's trace is shown instead, since "is anything running" is the
+#   question left.
+# ======================================================================
+setup
+export NAME_TABS=1 AUTO_INDEX=0
+fixture workspaces.json <<'JSON'
+{"result":{"workspaces":[{"workspace_id":"w1","label":"api"}]}}
+JSON
+out=$(run_event doctor)
+check_rc       "doctor still exits 0"                  0 $?
+check_contains "doctor says no tab resolved"           "$out" "tab: none resolved"
+check_contains "and shows the pass ran"                "$out" "lock acquired: action full pass"
+check_contains "the notification says so too"         "$(log)" "notification show Doctor: no tab resolved"
+teardown
+
+# ======================================================================
+# Scenario 51: an ordinary pass with AR_TRACE unset writes no trace file. The
+#   hooks fire this on every prompt, and a file that grows in the state dir
+#   without anyone asking is the one thing tracing must not do by default. Set
+#   empty rather than unset, so a developer's own AR_TRACE cannot make this pass.
+# ======================================================================
+setup
+export NAME_TABS=1 AUTO_INDEX=1
+SD="$XDG_STATE_HOME/herdr-automatic-rename"
+fixture workspaces.json <<'JSON'
+{"result":{"workspaces":[{"workspace_id":"w1","label":"api"}]}}
+JSON
+fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[{"tab_id":"w1:t1","label":"1","pane_count":1,"focused":true}]}}
+JSON
+fixture panes.json <<'JSON'
+{"result":{"panes":[{"pane_id":"p1","tab_id":"w1:t1","focused":true}]}}
+JSON
+fixture procinfo_p1.json <<'JSON'
+{"result":{"process_info":{"foreground_process_group_id":100,
+  "foreground_processes":[{"pid":100,"argv0":"-zsh","cmdline":"-zsh"}]}}}
+JSON
+AR_TRACE='' AR_TRACE_FILE='' run_event tab.focused
+check_contains "the pass still names the tab"   "$(log)" "tab rename w1:t1 [1] zsh"
+check "and leaves no trace.log behind"          "" "$(ls "$SD"/trace.log 2>/dev/null)"
+# The same pass with tracing on writes to the default path in the state dir.
+# herdr now reports the label the pass just wrote (see scenario 41).
+fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[{"tab_id":"w1:t1","label":"[1] zsh","pane_count":1,"focused":true}]}}
+JSON
+AR_TRACE=1 AR_TRACE_FILE='' run_event tab.focused
+check_contains "with AR_TRACE set the file appears" \
+  "$(cat "$SD/trace.log" 2>/dev/null)" "w1:t1 label already correct: [[1] zsh]"
+check "and is private to the user" "600" "$(stat -c %a "$SD/trace.log" 2>/dev/null || stat -f %Lp "$SD/trace.log" 2>/dev/null)"
+
+teardown
+
+# ======================================================================
+# Scenario 52: doctor under a held lock says so, like reset and clear, instead
+#   of reporting the old state and label as if a pass had just run.
+# ======================================================================
+setup
+export NAME_TABS=1 AUTO_INDEX=0
+mkdir -p "$XDG_STATE_HOME/herdr-automatic-rename/lock"
+fixture workspaces.json <<'JSON'
+{"result":{"workspaces":[{"workspace_id":"w1","label":"api"}]}}
+JSON
+fixture tabs_w1.json <<'JSON'
+{"result":{"tabs":[{"tab_id":"w1:t1","label":"[1] zsh","pane_count":1,"focused":true}]}}
+JSON
+out=$(HERDR_TAB_ID=w1:t1 run_event doctor)
+check_contains "a contended doctor says no pass ran" "$out" "held the lock"
+check_contains "and notifies like the other actions" "$(log)" \
+  "notification show Doctor is waiting --body Another naming pass held the lock. Try again."
+check_absent   "and prints no report"           "$out" "record:"
+
 teardown
 
 t_summary

@@ -1,6 +1,6 @@
 id = "herdr-automatic-rename"
 name = "Herdr Automatic Rename"
-version = "0.8.0"
+version = "0.11.0"
 # min_herdr_version stays at 0.7.1 deliberately. A requirement above the running
 # herdr is a HARD load failure (plugin_requires_newer_herdr), re-checked on every
 # event dispatch, whereas an event name an older herdr does not know is only an
@@ -155,6 +155,15 @@ id = "reset"
 title = "Reset tab to automatic naming"
 contexts = ["global"]
 command = ["bash", "automatic-rename.sh", "reset"]
+
+# Print why the current tab has the name it has: versions, the tab's state
+# record, its label, and the decisions one real pass made about it. Invoke with
+#   herdr plugin action invoke herdr-automatic-rename.doctor
+[[actions]]
+id = "doctor"
+title = "Herdr Automatic Rename: explain this tab's name"
+contexts = ["global"]
+command = ["bash", "automatic-rename.sh", "doctor"]
 
 # Strip every "[N] " prefix (restore base names / revert agents to detection).
 # For a clean uninstall, run the strip directly BEFORE uninstalling, so the
