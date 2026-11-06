@@ -97,6 +97,9 @@ case "$group" in
   pane)
     case "$action" in
       list) serve panes.json '{"result":{"panes":[]}}' ;;
+      # Sidebar tokens go to a log of their own, so the scenarios that assert a
+      # whole rename log are not disturbed by them.
+      report-metadata) printf 'pane report-metadata %s\n' "$*" >>"$log.meta" ;;
       process-info)
         p=""
         while [ $# -gt 0 ]; do case "$1" in --pane) p="$2"; shift 2 ;; *) shift ;; esac; done

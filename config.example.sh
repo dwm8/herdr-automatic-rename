@@ -137,6 +137,16 @@
 # U+203A, a single right-pointing angle quote.
 # CONTEXT_SEP=' › '
 
+# 1 = also hand each tab's name to herdr's sidebar as two pane tokens: $tab_task,
+# the last part of the name, and $tab_context, everything before it. A sidebar row
+# is one line and herdr cuts it rather than wrapping, so a long tab name loses its
+# task there; giving each token its own row shows both:
+#   [ui.sidebar.agents]
+#   rows = [["state_icon", "machine", "workspace", "agent"], ["$tab_context"], ["$tab_task"]]
+# Display only. A token is reported when it changes, never on a pass that finds it
+# already right.
+# REPORT_TAB_TOKENS=1
+
 # 1 = a regular program shows its full command line ("psql -h db"); 0 = just its
 # name ("psql"). Default 0.
 # SHOW_PROGRAM_ARGS=0

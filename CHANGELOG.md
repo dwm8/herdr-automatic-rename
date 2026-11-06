@@ -4,6 +4,10 @@ All notable changes to herdr-automatic-rename are documented here. The format fo
 
 ## [Unreleased]
 
+### Added
+
+- Each tab's name is handed to herdr's sidebar as two pane tokens, `$tab_context` and `$tab_task`, so a `[ui.sidebar.agents]` rows entry can put the context and the task on separate lines instead of cutting the name at the sidebar's edge. Reported only when a value changes; `REPORT_TAB_TOKENS=0` turns it off.
+
 ## [0.11.1] - 2026-09-11
 
 This release of the dwm8 fork includes upstream 0.11.0 and the fork's tab pins, Codex transcript titles, ignored context directories, and model-based agent names.

@@ -1842,7 +1842,8 @@ ar_reconcile_tabs() {
           ((.focused // false) | tostring), (._name_pane // ""),
           (((.label // "") != (.label | clean)) | tostring),
           (._name_agent // ""), (._name_title // ""), (._name_title_lc // ""),
-          (._name_dir_lc // ""), (._name_dir // ""), (._name_session // "") ]
+          (._name_dir_lc // ""), (._name_dir // ""), (._name_session // ""),
+          (._tok_panes // "") ]
       | join([31] | implode)' 2>/dev/null) || { AR_TABS_PARTIAL=1; continue; }
     # No rows is a workspace with no tabs, which was read in full: only a jq that
     # failed above is a workspace the prune must not judge.
@@ -1850,7 +1851,7 @@ ar_reconcile_tabs() {
     i=0
     while IFS=$AR_ROW_SEP read -r tid label pcount foc lpane dirty \
       AR_PANE_AGENT AR_PANE_TITLE AR_PANE_TITLE_LC AR_PANE_DIR_LC AR_PANE_DIR \
-      AR_PANE_SESSION; do
+      AR_PANE_SESSION tok_panes; do
       [ -n "$tid" ] || continue
       i=$(( i + 1 ))
       AR_SEEN_TABS="$AR_SEEN_TABS $tid"
@@ -1915,8 +1916,43 @@ ar_reconcile_tabs() {
         continue
       fi
       ar_state_claim "$tid" "$name" "$named" "$wsbase"
+      [ "$CLEAR" = "1" ] || ar_tab_tokens "$base" "$tok_panes"
     done <<< "$rows"
   done <<< "$wsrows"
+}
+
+# ar_tab_tokens <base> <panes> - hand the tab's name to herdr's sidebar in two
+# halves, as the pane tokens $tab_context and $tab_task. A sidebar row is one line
+# and herdr cuts it rather than wrapping, so "marketing-dashboard › clear-session-
+# model-switch" reads as half a name there; a [ui.sidebar.agents] rows entry that
+# puts each token on its own line shows both. The task is the last part of the name
+# and the context is everything before it, so a name with no CONTEXT_SEP is all
+# task. <panes> is the tab's _tok_panes from the snapshot: each pane with the
+# tokens it already holds, so a pass reports only a change. The per-list fallback
+# carries none, so it reports nothing. REPORT_TAB_TOKENS=0 turns this off.
+ar_tab_tokens() {
+  local base=$1 rest=$2 ctx="" task=$1 entry pid have_ctx have_task
+  [ "${REPORT_TAB_TOKENS:-1}" = "1" ] || return 0
+  if [ -n "$CONTEXT_SEP" ]; then
+    case "$base" in
+      *"$CONTEXT_SEP"*) ctx=${base%"$CONTEXT_SEP"*}; task=${base##*"$CONTEXT_SEP"} ;;
+    esac
+  fi
+  while [ -n "$rest" ]; do
+    entry=${rest%%$'\035'*}
+    case "$rest" in *$'\035'*) rest=${rest#*$'\035'} ;; *) rest="" ;; esac
+    IFS=$'\036' read -r pid have_ctx have_task <<< "$entry"
+    [ -n "$pid" ] || continue
+    [ "$have_ctx" = "$ctx" ] && [ "$have_task" = "$task" ] && continue
+    set -- pane report-metadata "$pid" --source herdr-automatic-rename
+    if [ -n "$ctx" ]; then set -- "$@" --token "tab_context=$ctx"; else set -- "$@" --clear-token tab_context; fi
+    if [ -n "$task" ]; then set -- "$@" --token "tab_task=$task"; else set -- "$@" --clear-token tab_task; fi
+    if "$HERDR" "$@" >/dev/null 2>&1; then
+      ar_trace "$pid tokens reported: [$ctx] [$task]"
+    else
+      ar_trace "$pid tokens report failed"
+    fi
+  done
 }
 
 # ar_agent_revert <pane_id> <base> <detected>
@@ -2517,7 +2553,12 @@ ar_reconcile() {
                    _name_title_lc: ($ti | ascii_downcase),
                    _name_dir_lc: (($dir | split("/") | last) // "" | ascii_downcase),
                    _name_dir: $dir,
-                   _name_session: ($p.agent_session.value | clean) } ]}}' 2>/dev/null)
+                   _name_session: ($p.agent_session.value | clean),
+                   # Every pane of the tab with the sidebar tokens it holds now,
+                   # so ar_tab_tokens reports only a change (see there).
+                   _tok_panes: ($pan | map(select(.tab_id == $t)
+                       | [(.pane_id // ""), (.tokens.tab_context // ""), (.tokens.tab_task // "")]
+                       | join([30] | implode)) | join([29] | implode)) } ]}}' 2>/dev/null)
     AR_SNAP_AGENTS_JSON=$(printf '%s' "$snap" | jq -c \
       '{result:{agents:((.result.snapshot // .snapshot).agents // [])}}' 2>/dev/null)
     # Lifted whatever the toggles say, because the workspace pass wants them as
